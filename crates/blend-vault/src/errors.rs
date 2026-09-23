@@ -1,20 +1,25 @@
 use soroban_sdk::contracterror;
 
-/// The error codes for the contract.
+/// Blend-specific errors. Codes 200–299 per the workspace numbering rule in
+/// `vault_common::VaultError`; the shared codes (not-positive amounts, sweep
+/// refusals, initialization) come from there and the share-token codes
+/// (100–114) from OpenZeppelin.
+///
+/// The fork this crate came from numbered its errors 100–113, which collided
+/// with OpenZeppelin's range once the token was delegated. Renumbered here.
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[repr(u32)]
 pub enum BlendVaultError {
-    // Default errors to align with built-in contract
-    BalanceError = 10,
-
-    ReserveNotFound = 100,
-    ReserveAlreadyExists = 101,
-    InvalidAmount = 102,
-    InsufficientReserves = 105,
-    InvalidBTokensMinted = 106,
-    InvalidBTokensBurnt = 107,
-    InvalidSharesMinted = 108,
-    InvalidSharesBurnt = 112,
-    SwapNotConfigured = 113,
+    /// The vault's own totals could not cover the burn: an accounting
+    /// invariant failure, not a user error.
+    InsufficientReserves = 200,
+    /// A deposit too small to mint a single bToken at the current `b_rate`.
+    InvalidBTokensMinted = 201,
+    /// A redeem too small to be worth a single underlying unit.
+    InvalidBTokensBurnt = 202,
+    /// A deposit too small to mint a single share at the current ratio.
+    InvalidSharesMinted = 203,
+    /// `claim_emissions` was called before `set_router`.
+    SwapNotConfigured = 205,
 }

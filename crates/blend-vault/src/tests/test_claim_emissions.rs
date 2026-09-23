@@ -1,13 +1,12 @@
 #![cfg(test)]
 
+use crate::blend::pool::Client as PoolClient;
 use crate::storage::ONE_DAY_LEDGERS;
 use crate::testutils::{
-    create_blend_pool, mocksoroswap, register_blend_vault, setup_pool_util_rate, EnvTestUtils,
+    create_blend_pool, mocksoroswap, register_blend_vault, setup_pool_util_rate, BlendFixture,
+    EnvTestUtils, MockTokenClient,
 };
 use crate::BlendVaultClient;
-use blend_contract_sdk::pool::Client as PoolClient;
-use blend_contract_sdk::testutils::BlendFixture;
-use sep_41_token::testutils::MockTokenClient;
 use soroban_sdk::{testutils::Address as _, Address, Env};
 
 /// Full claim_emissions flow using a mock Soroswap router.
@@ -29,9 +28,15 @@ fn test_claim_emissions_swaps_blnd_for_underlying() {
     let bombadil = Address::generate(&e);
     let frodo = Address::generate(&e);
 
-    let blnd = e.register_stellar_asset_contract_v2(bombadil.clone()).address();
-    let usdc = e.register_stellar_asset_contract_v2(bombadil.clone()).address();
-    let xlm = e.register_stellar_asset_contract_v2(bombadil.clone()).address();
+    let blnd = e
+        .register_stellar_asset_contract_v2(bombadil.clone())
+        .address();
+    let usdc = e
+        .register_stellar_asset_contract_v2(bombadil.clone())
+        .address();
+    let xlm = e
+        .register_stellar_asset_contract_v2(bombadil.clone())
+        .address();
     let usdc_client = MockTokenClient::new(&e, &usdc);
     let xlm_client = MockTokenClient::new(&e, &xlm);
 
@@ -51,17 +56,16 @@ fn test_claim_emissions_swaps_blnd_for_underlying() {
     // Establish pool liquidity so the vault's supply position accrues against real utilisation
     setup_pool_util_rate(&e, &pool, &bombadil, &usdc, &xlm, 100_000_0000000);
 
-    // Frodo deposits into vault — vault now has a supply position in the pool
+    // Frodo deposits into vault: vault now has a supply position in the pool
     let deposit = 10_000_0000000_i128;
     usdc_client.mint(&frodo, &deposit);
     blend_vault_client.deposit(&deposit, &frodo, &frodo, &frodo);
 
-    let pool_position_before = pool_client
-        .get_positions(&vault)
-        .supply
-        .get(0)
-        .unwrap_or(0);
-    assert!(pool_position_before > 0, "vault must have a pool supply position before claiming");
+    let pool_position_before = pool_client.get_positions(&vault).supply.get(0).unwrap_or(0);
+    assert!(
+        pool_position_before > 0,
+        "vault must have a pool supply position before claiming"
+    );
 
     let b_tokens_before = blend_vault_client.get_vault().total_b_tokens;
 
@@ -69,7 +73,7 @@ fn test_claim_emissions_swaps_blnd_for_underlying() {
     // emitter.distribute mints BLND to the backstop for the 7-day elapsed period.
     // backstop.distribute allocates that to each reward-zone pool's rz_emis.accrued.
     // pool.gulp_emissions consumes rz_emis.accrued and sets the emission rate (eps) for
-    // the NEXT 7 days — it does NOT give a lump sum; the eps accumulates over time.
+    // the NEXT 7 days: it does NOT give a lump sum; the eps accumulates over time.
     e.jump(ONE_DAY_LEDGERS * 7);
     blend_fixture.emitter.distribute();
     blend_fixture.backstop.distribute();
@@ -94,11 +98,7 @@ fn test_claim_emissions_swaps_blnd_for_underlying() {
         b_tokens_after,
     );
 
-    let pool_position_after = pool_client
-        .get_positions(&vault)
-        .supply
-        .get(0)
-        .unwrap_or(0);
+    let pool_position_after = pool_client.get_positions(&vault).supply.get(0).unwrap_or(0);
     assert!(
         pool_position_after > pool_position_before,
         "pool bToken position must grow: before={}, after={}",
@@ -118,9 +118,15 @@ fn test_claim_emissions_zero_blnd_returns_zero() {
 
     let bombadil = Address::generate(&e);
 
-    let blnd = e.register_stellar_asset_contract_v2(bombadil.clone()).address();
-    let usdc = e.register_stellar_asset_contract_v2(bombadil.clone()).address();
-    let xlm = e.register_stellar_asset_contract_v2(bombadil.clone()).address();
+    let blnd = e
+        .register_stellar_asset_contract_v2(bombadil.clone())
+        .address();
+    let usdc = e
+        .register_stellar_asset_contract_v2(bombadil.clone())
+        .address();
+    let xlm = e
+        .register_stellar_asset_contract_v2(bombadil.clone())
+        .address();
     let usdc_client = MockTokenClient::new(&e, &usdc);
     let xlm_client = MockTokenClient::new(&e, &xlm);
 

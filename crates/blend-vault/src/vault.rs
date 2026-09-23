@@ -1,12 +1,14 @@
-use crate::{
-    constants::SCALAR_12,
-    errors::BlendVaultError,
-    pool,
-    storage,
-    validator::require_positive,
-};
-use soroban_fixed_point_math::{i128, FixedPoint};
-use soroban_sdk::{contracttype, panic_with_error, unwrap::UnwrapOptimized, Address, Env};
+//! The vault's own accounting: a `total_shares / total_b_tokens` ratio on top
+//! of the pool's `b_rate`. This is the rate math, and it stays in the adapter
+//! on purpose: it is what differs between protocols.
+//!
+//! Share balances themselves live in OpenZeppelin `Base`; this module only
+//! decides how many to mint or burn.
+
+use crate::{constants::SCALAR_12, errors::BlendVaultError, pool, storage};
+use soroban_sdk::{contracttype, panic_with_error, Address, Env};
+use stellar_tokens::fungible::Base;
+use vault_common::math::mul_div_floor;
 
 #[derive(Clone)]
 #[cfg_attr(test, derive(Debug))]
@@ -16,64 +18,62 @@ pub struct VaultData {
     pub last_update_timestamp: u64,
     /// The reserve's last bRate
     pub b_rate: i128,
-    /// The total shares issued by the reserve vault
+    /// The total shares issued by the vault
     pub total_shares: i128,
-    /// The total bToken deposits owned by the reserve vault depositors.
+    /// The total bToken deposits owned by the vault depositors.
     pub total_b_tokens: i128,
+}
+
+/// `ceil(x * y / denominator)` for non-negative operands.
+fn mul_div_ceil(e: &Env, x: i128, y: i128, denominator: i128) -> i128 {
+    let floor = mul_div_floor(e, x, y, denominator);
+    if x != 0 && y != 0 && mul_div_floor(e, floor, denominator, y) < x {
+        floor + 1
+    } else {
+        floor
+    }
 }
 
 impl VaultData {
     /// Converts a b_token amount to shares rounding down
-    pub fn b_tokens_to_shares_down(&self, amount: i128) -> i128 {
+    pub fn b_tokens_to_shares_down(&self, e: &Env, amount: i128) -> i128 {
         if self.total_shares == 0 || self.total_b_tokens == 0 {
             return amount;
         }
-        amount
-            .fixed_mul_floor(self.total_shares, self.total_b_tokens)
-            .unwrap_optimized()
+        mul_div_floor(e, amount, self.total_shares, self.total_b_tokens)
     }
 
     /// Converts a b_token amount to shares rounding up
-    pub fn b_tokens_to_shares_up(&self, amount: i128) -> i128 {
+    pub fn b_tokens_to_shares_up(&self, e: &Env, amount: i128) -> i128 {
         if self.total_shares == 0 || self.total_b_tokens == 0 {
             return amount;
         }
-        amount
-            .fixed_mul_ceil(self.total_shares, self.total_b_tokens)
-            .unwrap_optimized()
+        mul_div_ceil(e, amount, self.total_shares, self.total_b_tokens)
     }
 
     /// Converts a share amount to a b_token amount rounding down
-    pub fn shares_to_b_tokens_down(&self, amount: i128) -> i128 {
+    pub fn shares_to_b_tokens_down(&self, e: &Env, amount: i128) -> i128 {
         if self.total_shares == 0 {
             // an empty vault mints shares 1:1 with bTokens, so quote the same
             // rate a first deposit would get
             return amount;
         }
-        amount
-            .fixed_div_floor(self.total_shares, self.total_b_tokens)
-            .unwrap_optimized()
+        mul_div_floor(e, amount, self.total_b_tokens, self.total_shares)
     }
 
     /// Converts a b_token amount to an underlying token amount rounding down
-    pub fn b_tokens_to_underlying_down(&self, amount: i128) -> i128 {
-        amount
-            .fixed_mul_floor(self.b_rate, SCALAR_12)
-            .unwrap_optimized()
+    pub fn b_tokens_to_underlying_down(&self, e: &Env, amount: i128) -> i128 {
+        mul_div_floor(e, amount, self.b_rate, SCALAR_12)
     }
 
     /// Converts an underlying amount to a b_token amount rounding down
-    pub fn underlying_to_b_tokens_down(&self, amount: i128) -> i128 {
-        amount
-            .fixed_div_floor(self.b_rate, SCALAR_12)
-            .unwrap_optimized()
+    pub fn underlying_to_b_tokens_down(&self, e: &Env, amount: i128) -> i128 {
+        mul_div_floor(e, amount, SCALAR_12, self.b_rate)
     }
 
     /// Converts an underlying amount to a b_token amount rounding up
-    pub fn underlying_to_b_tokens_up(&self, amount: i128) -> i128 {
-        amount
-            .fixed_div_ceil(self.b_rate, SCALAR_12)
-            .unwrap_optimized()
+    pub fn underlying_to_b_tokens_up(&self, e: &Env, amount: i128) -> i128 {
+        mul_div_ceil(e, amount, SCALAR_12, self.b_rate)
     }
 
     /// Updates the reserve's bRate
@@ -83,14 +83,7 @@ impl VaultData {
     }
 }
 
-/// Get the reserve vault from storage and update the bRate
-///
-/// ### Arguments
-/// * `pool` - The pool address
-/// * `asset` - The asset address
-///
-/// ### Returns
-/// * `VaultData` - The updated reserve vault
+/// Get the vault data from storage and update the bRate
 pub fn get_vault_updated(e: &Env, pool: &Address, asset: &Address) -> VaultData {
     let mut vault = storage::get_vault_data(e);
     vault.update_rate(e, pool, asset);
@@ -103,7 +96,7 @@ pub fn get_vault_updated(e: &Env, pool: &Address, asset: &Address) -> VaultData 
 /// * `(i128, i128)` - (The amount of b_tokens minted to the vault, the amount of shares minted to the user)
 ///
 /// ### Panics
-/// * If the underlying amount is less than or equal to 0
+/// * If the amount rounds to zero bTokens or zero shares
 pub fn deposit(
     e: &Env,
     pool: &Address,
@@ -112,88 +105,34 @@ pub fn deposit(
     amount: i128,
 ) -> (i128, i128) {
     let mut vault = get_vault_updated(e, pool, asset);
-    let mut user_shares = storage::get_vault_shares(e, user);
 
-    let b_tokens_amount = vault.underlying_to_b_tokens_down(amount);
-    require_positive(e, b_tokens_amount, BlendVaultError::InvalidBTokensMinted);
-    let share_amount = vault.b_tokens_to_shares_down(b_tokens_amount);
-    require_positive(e, share_amount, BlendVaultError::InvalidSharesMinted);
+    let b_tokens_amount = vault.underlying_to_b_tokens_down(e, amount);
+    if b_tokens_amount <= 0 {
+        panic_with_error!(e, BlendVaultError::InvalidBTokensMinted);
+    }
+    let share_amount = vault.b_tokens_to_shares_down(e, b_tokens_amount);
+    if share_amount <= 0 {
+        panic_with_error!(e, BlendVaultError::InvalidSharesMinted);
+    }
 
     vault.total_shares += share_amount;
     vault.total_b_tokens += b_tokens_amount;
-    user_shares += share_amount;
     storage::set_vault_data(e, &vault);
-    storage::set_vault_shares(e, user, user_shares);
+    Base::mint(e, user, share_amount);
     (b_tokens_amount, share_amount)
-}
-
-/// Withdraw from the vault. Does not perform the call to the pool to withdraw the tokens.
-///
-/// ### Returns
-/// * `(i128, i128, i128)` - (
-///         The underlying to withdraw from the pool,
-///         The amount of b_tokens burned from the vault,
-///         the amount of shares burned from the user
-///     )
-///
-/// ### Panics
-/// * If the amount is less than or equal to 0
-/// * If the user does not have enough shares or bTokens to withdraw
-pub fn withdraw(
-    e: &Env,
-    pool: &Address,
-    asset: &Address,
-    user: &Address,
-    amount: i128,
-) -> (i128, i128, i128) {
-    let mut vault = get_vault_updated(e, pool, asset);
-    let mut user_shares = storage::get_vault_shares(e, user);
-
-    let mut b_tokens_amount = vault.underlying_to_b_tokens_up(amount);
-    require_positive(e, b_tokens_amount, BlendVaultError::InvalidBTokensBurnt);
-    let mut share_amount = vault.b_tokens_to_shares_up(b_tokens_amount);
-    require_positive(e, share_amount, BlendVaultError::InvalidSharesBurnt);
-    let mut underlying_amount = amount;
-
-    if share_amount > user_shares {
-        // input amount is too high - burn all shares if user has shares to burn
-        // round b_token and underlying down to prevent excess withdrawal amounts
-        require_positive(e, user_shares, BlendVaultError::BalanceError);
-        share_amount = user_shares;
-        underlying_amount =
-            vault.b_tokens_to_underlying_down(vault.shares_to_b_tokens_down(share_amount));
-        // the blend pool will round up the b_tokens burnt based on the underlying amount withdrawn
-        b_tokens_amount = vault.underlying_to_b_tokens_up(underlying_amount);
-    }
-
-    if vault.total_shares < share_amount || vault.total_b_tokens < b_tokens_amount {
-        panic_with_error!(e, BlendVaultError::InsufficientReserves);
-    }
-
-    vault.total_shares -= share_amount;
-    vault.total_b_tokens -= b_tokens_amount;
-
-    user_shares -= share_amount;
-    storage::set_vault_data(e, &vault);
-    storage::set_vault_shares(e, user, user_shares);
-    (underlying_amount, b_tokens_amount, share_amount)
 }
 
 /// Redeem an exact share amount from the vault. Does not perform the call to the
 /// pool to withdraw the tokens.
 ///
-/// Unlike [`withdraw`], the share amount is not clamped to the user's balance:
-/// the caller asked for an exact number of shares, so an over-large request is
-/// an error rather than a hint.
+/// The share amount is not clamped to the user's balance: the caller asked for
+/// an exact number of shares, so an over-large request is an error (raised by
+/// OpenZeppelin as `InsufficientBalance`) rather than a hint.
 ///
 /// ### Returns
-/// * `(i128, i128)` - (
-///         The underlying to withdraw from the pool,
-///         The amount of b_tokens burned from the vault
-///     )
+/// * `(i128, i128)` - (The underlying to withdraw from the pool, the amount of b_tokens burned from the vault)
 ///
 /// ### Panics
-/// * If the share amount is less than or equal to 0
 /// * If the resulting underlying amount rounds down to 0
 /// * If the user holds fewer than `shares` shares
 pub fn redeem(
@@ -204,22 +143,22 @@ pub fn redeem(
     shares: i128,
 ) -> (i128, i128) {
     let mut vault = get_vault_updated(e, pool, asset);
-    let user_shares = storage::get_vault_shares(e, user);
 
-    require_positive(e, shares, BlendVaultError::InvalidSharesBurnt);
-    if shares > user_shares {
-        panic_with_error!(e, BlendVaultError::BalanceError);
+    let b_tokens_down = vault.shares_to_b_tokens_down(e, shares);
+    let underlying_amount = vault.b_tokens_to_underlying_down(e, b_tokens_down);
+    if underlying_amount <= 0 {
+        panic_with_error!(e, BlendVaultError::InvalidBTokensBurnt);
     }
-
-    let b_tokens_down = vault.shares_to_b_tokens_down(shares);
-    let underlying_amount = vault.b_tokens_to_underlying_down(b_tokens_down);
-    require_positive(e, underlying_amount, BlendVaultError::InvalidBTokensBurnt);
 
     // The blend pool rounds the b_tokens it burns UP from the underlying amount
     // requested, so the vault's own accounting has to use the same figure or
-    // total_b_tokens drifts above the real position. This is the same reason
-    // `withdraw` recomputes with `_up` in its clamp branch above.
-    let b_tokens_amount = vault.underlying_to_b_tokens_up(underlying_amount);
+    // total_b_tokens drifts above the real position.
+    let b_tokens_amount = vault.underlying_to_b_tokens_up(e, underlying_amount);
+
+    // Burns exactly `shares`; panics with OZ `InsufficientBalance` if short.
+    // Before the reserves check so a caller sees their own error, not the
+    // accounting invariant's; a panic reverts everything either way.
+    Base::update(e, Some(user), None, shares);
 
     if vault.total_shares < shares || vault.total_b_tokens < b_tokens_amount {
         panic_with_error!(e, BlendVaultError::InsufficientReserves);
@@ -227,8 +166,6 @@ pub fn redeem(
 
     vault.total_shares -= shares;
     vault.total_b_tokens -= b_tokens_amount;
-
-    storage::set_vault_shares(e, user, user_shares - shares);
     storage::set_vault_data(e, &vault);
 
     (underlying_amount, b_tokens_amount)
@@ -270,38 +207,42 @@ mod proptests {
     proptest! {
         #[test]
         fn conversions_never_panic(vault in vault_state(), amount in 0i128..=MAX_TOKENS) {
-            vault.b_tokens_to_shares_down(amount);
-            vault.b_tokens_to_shares_up(amount);
-            vault.shares_to_b_tokens_down(amount);
-            vault.b_tokens_to_underlying_down(amount);
-            vault.underlying_to_b_tokens_down(amount);
-            vault.underlying_to_b_tokens_up(amount);
+            let e = Env::default();
+            vault.b_tokens_to_shares_down(&e, amount);
+            vault.b_tokens_to_shares_up(&e, amount);
+            vault.shares_to_b_tokens_down(&e, amount);
+            vault.b_tokens_to_underlying_down(&e, amount);
+            vault.underlying_to_b_tokens_down(&e, amount);
+            vault.underlying_to_b_tokens_up(&e, amount);
         }
 
         /// Minting shares from bTokens and converting back never gains bTokens.
         #[test]
         fn share_round_trip_never_gains(vault in vault_state(), b_tokens in 0i128..=MAX_TOKENS) {
-            let shares = vault.b_tokens_to_shares_down(b_tokens);
-            prop_assert!(vault.shares_to_b_tokens_down(shares) <= b_tokens);
+            let e = Env::default();
+            let shares = vault.b_tokens_to_shares_down(&e, b_tokens);
+            prop_assert!(vault.shares_to_b_tokens_down(&e, shares) <= b_tokens);
         }
 
         /// Converting underlying to bTokens and back never gains underlying.
         #[test]
         fn underlying_round_trip_never_gains(vault in vault_state(), amount in 0i128..=MAX_TOKENS) {
-            let b_tokens = vault.underlying_to_b_tokens_down(amount);
-            prop_assert!(vault.b_tokens_to_underlying_down(b_tokens) <= amount);
+            let e = Env::default();
+            let b_tokens = vault.underlying_to_b_tokens_down(&e, amount);
+            prop_assert!(vault.b_tokens_to_underlying_down(&e, b_tokens) <= amount);
         }
 
         /// The up and down variants bracket the exact ratio and differ by at most 1.
         #[test]
         fn rounding_up_within_one_of_down(vault in vault_state(), amount in 0i128..=MAX_TOKENS) {
-            let shares_down = vault.b_tokens_to_shares_down(amount);
-            let shares_up = vault.b_tokens_to_shares_up(amount);
+            let e = Env::default();
+            let shares_down = vault.b_tokens_to_shares_down(&e, amount);
+            let shares_up = vault.b_tokens_to_shares_up(&e, amount);
             prop_assert!(shares_down <= shares_up);
             prop_assert!(shares_up - shares_down <= 1);
 
-            let b_tokens_down = vault.underlying_to_b_tokens_down(amount);
-            let b_tokens_up = vault.underlying_to_b_tokens_up(amount);
+            let b_tokens_down = vault.underlying_to_b_tokens_down(&e, amount);
+            let b_tokens_up = vault.underlying_to_b_tokens_up(&e, amount);
             prop_assert!(b_tokens_down <= b_tokens_up);
             prop_assert!(b_tokens_up - b_tokens_down <= 1);
         }
@@ -314,10 +255,11 @@ mod proptests {
             a in 0i128..=MAX_TOKENS,
             b in 0i128..=MAX_TOKENS,
         ) {
+            let e = Env::default();
             let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
-            prop_assert!(vault.shares_to_b_tokens_down(lo) <= vault.shares_to_b_tokens_down(hi));
-            prop_assert!(vault.b_tokens_to_shares_down(lo) <= vault.b_tokens_to_shares_down(hi));
-            prop_assert!(vault.b_tokens_to_underlying_down(lo) <= vault.b_tokens_to_underlying_down(hi));
+            prop_assert!(vault.shares_to_b_tokens_down(&e, lo) <= vault.shares_to_b_tokens_down(&e, hi));
+            prop_assert!(vault.b_tokens_to_shares_down(&e, lo) <= vault.b_tokens_to_shares_down(&e, hi));
+            prop_assert!(vault.b_tokens_to_underlying_down(&e, lo) <= vault.b_tokens_to_underlying_down(&e, hi));
         }
     }
 
@@ -345,53 +287,45 @@ mod proptests {
         // Each case registers contracts in a fresh Env, so run fewer cases.
         #![proptest_config(ProptestConfig::with_cases(64))]
 
-        /// With an unchanged b_rate, a deposit followed by withdrawing the full
-        /// position can never extract more underlying than was deposited —
-        /// neither immediately (position value) nor via the withdraw path.
+        /// With an unchanged b_rate, a deposit followed by redeeming every share
+        /// it minted can never extract more underlying than was deposited.
         #[test]
-        fn deposit_then_full_withdraw_never_profits(
+        fn deposit_then_full_redeem_never_profits(
             initial_state in proportional_vault_state(),
             amount in 1_0000000i128..=MAX_TOKENS,
         ) {
-            // skip dust deposits the contract (correctly) rejects
-            let b_tokens = initial_state.underlying_to_b_tokens_down(amount);
-            prop_assume!(b_tokens > 0);
-            prop_assume!(initial_state.b_tokens_to_shares_down(b_tokens) > 0);
-
             let e = Env::default();
             e.mock_all_auths();
+
+            // skip dust deposits the contract (correctly) rejects
+            let b_tokens = initial_state.underlying_to_b_tokens_down(&e, amount);
+            prop_assume!(b_tokens > 0);
+            prop_assume!(initial_state.b_tokens_to_shares_down(&e, b_tokens) > 0);
+
             let bombadil = Address::generate(&e);
             let samwise = Address::generate(&e);
             let (vault_address, pool, asset) =
                 create_test_blend_vault(&e, &bombadil, Some(initial_state.b_rate));
 
-            let (position_value, withdrawn, residual_value) =
-                e.as_contract(&vault_address, || {
-                    storage::set_vault_data(&e, &initial_state);
+            let (position_value, withdrawn) = e.as_contract(&vault_address, || {
+                storage::set_vault_data(&e, &initial_state);
 
-                    let (_, shares_minted) = deposit(&e, &pool, &asset, &samwise, amount);
+                let (_, shares_minted) = deposit(&e, &pool, &asset, &samwise, amount);
 
-                    let v = storage::get_vault_data(&e);
-                    let position_value =
-                        v.b_tokens_to_underlying_down(v.shares_to_b_tokens_down(shares_minted));
+                let v = storage::get_vault_data(&e);
+                let position_value =
+                    v.b_tokens_to_underlying_down(&e, v.shares_to_b_tokens_down(&e, shares_minted));
 
-                    if position_value == 0 {
-                        return (0, 0, 0);
-                    }
-                    let (withdrawn, _, _) =
-                        withdraw(&e, &pool, &asset, &samwise, position_value);
-
-                    // value of any shares left behind by rounding
-                    let v = storage::get_vault_data(&e);
-                    let remaining_shares = storage::get_vault_shares(&e, &samwise);
-                    let residual_value = v
-                        .b_tokens_to_underlying_down(v.shares_to_b_tokens_down(remaining_shares));
-
-                    (position_value, withdrawn, residual_value)
-                });
+                if position_value == 0 {
+                    return Ok((0, 0));
+                }
+                let (withdrawn, _) = redeem(&e, &pool, &asset, &samwise, shares_minted);
+                prop_assert_eq!(Base::balance(&e, &samwise), 0);
+                Ok((position_value, withdrawn))
+            })?;
 
             prop_assert!(position_value <= amount);
-            prop_assert!(withdrawn + residual_value <= amount);
+            prop_assert!(withdrawn <= amount);
         }
     }
 }
@@ -399,11 +333,15 @@ mod proptests {
 #[cfg(test)]
 mod generic_tests {
     use super::*;
-    use crate::testutils::{create_test_blend_vault, mockpool::MockPoolClient, EnvTestUtils};
+    use crate::testutils::{
+        create_test_blend_vault, fixed_div_floor, fixed_mul_floor, mockpool::MockPoolClient,
+        EnvTestUtils,
+    };
     use soroban_sdk::{testutils::Address as _, Address};
 
     #[test]
     fn test_b_tokens_to_shares_down() {
+        let e = Env::default();
         let mut vault = VaultData {
             b_rate: 1_000_000_000_000,
             last_update_timestamp: 0,
@@ -414,24 +352,25 @@ mod generic_tests {
         // rounds down
         vault.total_shares = 200_0000001;
         vault.total_b_tokens = 100_0000000;
-        let b_tokens = vault.b_tokens_to_shares_down(1_0000000);
+        let b_tokens = vault.b_tokens_to_shares_down(&e, 1_0000000);
         assert_eq!(b_tokens, 2_0000000);
 
         // returns amount if total_shares is 0
         vault.total_shares = 0;
         vault.total_b_tokens = 100_0000000;
-        let b_tokens = vault.b_tokens_to_shares_down(1_0000000);
+        let b_tokens = vault.b_tokens_to_shares_down(&e, 1_0000000);
         assert_eq!(b_tokens, 1_0000000);
 
         // returns amount if total_b_tokens is 0
         vault.total_shares = 200_0000000;
         vault.total_b_tokens = 0;
-        let b_tokens = vault.b_tokens_to_shares_down(1_0000000);
+        let b_tokens = vault.b_tokens_to_shares_down(&e, 1_0000000);
         assert_eq!(b_tokens, 1_0000000);
     }
 
     #[test]
     fn test_b_tokens_to_shares_up() {
+        let e = Env::default();
         let mut vault = VaultData {
             b_rate: 1_000_000_000_000,
             last_update_timestamp: 0,
@@ -442,24 +381,25 @@ mod generic_tests {
         // rounds up
         vault.total_shares = 200_0000001;
         vault.total_b_tokens = 100_0000000;
-        let b_tokens = vault.b_tokens_to_shares_up(1_0000000);
+        let b_tokens = vault.b_tokens_to_shares_up(&e, 1_0000000);
         assert_eq!(b_tokens, 2_0000001);
 
         // returns amount if total_shares is 0
         vault.total_shares = 0;
         vault.total_b_tokens = 100_0000000;
-        let b_tokens = vault.b_tokens_to_shares_up(1_0000000);
+        let b_tokens = vault.b_tokens_to_shares_up(&e, 1_0000000);
         assert_eq!(b_tokens, 1_0000000);
 
         // returns amount if total_b_tokens is 0
         vault.total_shares = 200_0000000;
         vault.total_b_tokens = 0;
-        let b_tokens = vault.b_tokens_to_shares_up(1_0000000);
+        let b_tokens = vault.b_tokens_to_shares_up(&e, 1_0000000);
         assert_eq!(b_tokens, 1_0000000);
     }
 
     #[test]
     fn test_shares_to_b_tokens_down() {
+        let e = Env::default();
         let mut vault = VaultData {
             b_rate: 1_000_000_000_000,
             last_update_timestamp: 0,
@@ -470,19 +410,19 @@ mod generic_tests {
         // rounds down
         vault.total_shares = 200_0000001;
         vault.total_b_tokens = 100_0000000;
-        let b_tokens = vault.shares_to_b_tokens_down(2_0000000);
+        let b_tokens = vault.shares_to_b_tokens_down(&e, 2_0000000);
         assert_eq!(b_tokens, 0_9999999);
 
         // returns 0 if total_b_tokens is 0
         vault.total_shares = 200_0000000;
         vault.total_b_tokens = 0;
-        let b_tokens = vault.shares_to_b_tokens_down(2_0000000);
+        let b_tokens = vault.shares_to_b_tokens_down(&e, 2_0000000);
         assert_eq!(b_tokens, 0);
 
         // returns amount 1:1 if total_shares is 0 (empty vault, first deposit rate)
         vault.total_shares = 0;
         vault.total_b_tokens = 0;
-        let b_tokens = vault.shares_to_b_tokens_down(2_0000000);
+        let b_tokens = vault.shares_to_b_tokens_down(&e, 2_0000000);
         assert_eq!(b_tokens, 2_0000000);
     }
 
@@ -506,31 +446,25 @@ mod generic_tests {
             };
             storage::set_vault_data(&e, &vault_data);
 
-            // Raise b_rate and deposit — update_rate picks up the new rate, no fee deduction
+            // Raise b_rate and deposit: update_rate picks up the new rate
             let new_b_rate = 1_110_000_000_000;
             mock_client.set_b_rate(&new_b_rate);
             e.jump(5);
 
             let amount = 100_0000000;
-            let expected_b_tokens = amount
-                .fixed_div_floor(new_b_rate, SCALAR_12)
-                .unwrap_optimized();
-            let expected_shares = expected_b_tokens
-                .fixed_mul_floor(1200_0000000, 1000_0000000)
-                .unwrap_optimized();
+            let expected_b_tokens = fixed_div_floor(amount, new_b_rate, SCALAR_12);
+            let expected_shares = fixed_mul_floor(expected_b_tokens, 1200_0000000, 1000_0000000);
 
             let (b_tokens_minted, shares_minted) = deposit(&e, &pool, &asset, &samwise, amount);
             assert_eq!(b_tokens_minted, expected_b_tokens);
             assert_eq!(shares_minted, expected_shares);
 
-            // All b_tokens go to depositors — no admin deduction
             let new_vault = storage::get_vault_data(&e);
             assert_eq!(new_vault.total_shares, 1200_0000000 + expected_shares);
             assert_eq!(new_vault.total_b_tokens, 1000_0000000 + expected_b_tokens);
             assert_eq!(new_vault.b_rate, new_b_rate);
 
-            let new_balance = storage::get_vault_shares(&e, &samwise);
-            assert_eq!(new_balance, expected_shares);
+            assert_eq!(Base::balance(&e, &samwise), expected_shares);
         });
     }
 
@@ -554,54 +488,27 @@ mod generic_tests {
             };
             storage::set_vault_data(&e, &vault_data);
 
-            // Perform a deposit for samwise
             let new_b_rate = 1_100_000_000_000;
             mock_client.set_b_rate(&new_b_rate);
             e.jump(5);
             let amount = 100_0000000;
-            let expected_b_tokens = amount
-                .fixed_div_floor(new_b_rate, SCALAR_12)
-                .unwrap_optimized();
+            let expected_b_tokens = fixed_div_floor(amount, new_b_rate, SCALAR_12);
             let (b_tokens_minted, shares_minted) = deposit(&e, &pool, &asset, &samwise, amount);
 
-            // Load the updated vault to verify the changes
-            let expected_share_amount = expected_b_tokens;
+            // first deposit mints shares 1:1 with bTokens
             assert_eq!(b_tokens_minted, expected_b_tokens);
-            assert_eq!(shares_minted, expected_share_amount);
+            assert_eq!(shares_minted, expected_b_tokens);
             let new_vault = storage::get_vault_data(&e);
-            assert_eq!(new_vault.total_shares, expected_share_amount);
+            assert_eq!(new_vault.total_shares, expected_b_tokens);
             assert_eq!(new_vault.total_b_tokens, b_tokens_minted);
             assert_eq!(new_vault.b_rate, new_b_rate);
 
-            let new_balance = storage::get_vault_shares(&e, &samwise);
-            assert_eq!(new_balance, expected_share_amount);
+            assert_eq!(Base::balance(&e, &samwise), expected_b_tokens);
         });
     }
 
     #[test]
-    #[should_panic(expected = "Error(Contract, #106)")]
-    fn test_deposit_zero_amount() {
-        let e = Env::default();
-        e.mock_all_auths();
-
-        let bombadil = Address::generate(&e);
-        let samwise = Address::generate(&e);
-        let (vault_address, pool, asset) = create_test_blend_vault(&e, &bombadil, None);
-        e.as_contract(&vault_address, || {
-            let vault_data = VaultData {
-                total_b_tokens: 1000_0000000,
-                total_shares: 1200_0000000,
-                b_rate: 1_100_000_000_000,
-                last_update_timestamp: e.ledger().timestamp(),
-            };
-            storage::set_vault_data(&e, &vault_data);
-
-            deposit(&e, &pool, &asset, &samwise, 0);
-        });
-    }
-
-    #[test]
-    #[should_panic(expected = "Error(Contract, #106)")]
+    #[should_panic(expected = "Error(Contract, #201)")]
     fn test_deposit_zero_b_tokens() {
         let e = Env::default();
         e.mock_all_auths();
@@ -624,7 +531,7 @@ mod generic_tests {
     }
 
     #[test]
-    #[should_panic(expected = "Error(Contract, #108)")]
+    #[should_panic(expected = "Error(Contract, #203)")]
     fn test_deposit_zero_shares() {
         let e = Env::default();
         e.mock_all_auths();
@@ -648,7 +555,7 @@ mod generic_tests {
     }
 
     #[test]
-    fn test_withdraw() {
+    fn test_redeem() {
         let e = Env::default();
         e.mock_all_auths();
 
@@ -667,28 +574,28 @@ mod generic_tests {
 
             // samwise owns all shares
             let sam_shares = 1200_0000000;
-            storage::set_vault_shares(&e, &samwise, sam_shares);
+            Base::mint(&e, &samwise, sam_shares);
 
-            let b_tokens_to_withdraw = 50_0000000;
-            let withdraw_amount = vault_data.b_tokens_to_underlying_down(b_tokens_to_withdraw);
+            let shares_to_redeem = 60_0000000;
+            let expected_b_tokens = vault_data.shares_to_b_tokens_down(&e, shares_to_redeem);
+            let expected_underlying = vault_data.b_tokens_to_underlying_down(&e, expected_b_tokens);
 
-            let (underlying_withdrawn, b_tokens_burnt, shares_burnt) =
-                withdraw(&e, &pool, &asset, &samwise, withdraw_amount);
-            assert_eq!(underlying_withdrawn, withdraw_amount);
-            assert_eq!(b_tokens_burnt, b_tokens_to_withdraw);
+            let (underlying, b_tokens_burnt) =
+                redeem(&e, &pool, &asset, &samwise, shares_to_redeem);
+            assert_eq!(underlying, expected_underlying);
+            assert_eq!(b_tokens_burnt, expected_b_tokens);
 
             let new_vault = storage::get_vault_data(&e);
-            assert_eq!(new_vault.total_shares, 1200_0000000 - shares_burnt);
-            assert_eq!(new_vault.total_b_tokens, 1000_0000000 - b_tokens_to_withdraw);
+            assert_eq!(new_vault.total_shares, 1200_0000000 - shares_to_redeem);
+            assert_eq!(new_vault.total_b_tokens, 1000_0000000 - b_tokens_burnt);
             assert_eq!(new_vault.b_rate, 1_100_000_000_000);
 
-            let new_balance = storage::get_vault_shares(&e, &samwise);
-            assert_eq!(new_balance, sam_shares - shares_burnt);
+            assert_eq!(Base::balance(&e, &samwise), sam_shares - shares_to_redeem);
         });
     }
 
     #[test]
-    fn test_withdraw_max() {
+    fn test_redeem_all_drains_the_vault() {
         let e = Env::default();
         e.mock_all_auths();
 
@@ -704,172 +611,68 @@ mod generic_tests {
                 last_update_timestamp: e.ledger().timestamp(),
             };
             storage::set_vault_data(&e, &vault_data);
+            Base::mint(&e, &samwise, vault_data.total_shares);
 
-            storage::set_vault_shares(&e, &samwise, vault_data.total_shares);
-            let withdraw_amount = vault_data.b_tokens_to_underlying_down(1000_0000000);
-
-            let (underlying_withdrawn, b_tokens_burnt, shares_burnt) =
-                withdraw(&e, &pool, &asset, &samwise, withdraw_amount);
-            assert_eq!(underlying_withdrawn, withdraw_amount);
+            let (underlying, b_tokens_burnt) =
+                redeem(&e, &pool, &asset, &samwise, vault_data.total_shares);
+            assert_eq!(
+                underlying,
+                vault_data.b_tokens_to_underlying_down(&e, 1000_0000000)
+            );
             assert_eq!(b_tokens_burnt, 1000_0000000);
-            assert_eq!(shares_burnt, 1200_0000000);
-            let new_balance = storage::get_vault_shares(&e, &samwise);
-            assert_eq!(new_balance, 0);
-        });
-    }
-
-    #[test]
-    #[should_panic(expected = "Error(Contract, #107)")]
-    fn test_withdraw_zero_amount() {
-        let e = Env::default();
-        e.mock_all_auths();
-
-        let bombadil = Address::generate(&e);
-        let samwise = Address::generate(&e);
-        let (vault_address, pool, asset) = create_test_blend_vault(&e, &bombadil, None);
-
-        e.as_contract(&vault_address, || {
-            let vault_data = VaultData {
-                total_b_tokens: 1000_0000000,
-                total_shares: 1200_0000000,
-                b_rate: 1_100_000_000_000,
-                last_update_timestamp: e.ledger().timestamp(),
-            };
-            storage::set_vault_data(&e, &vault_data);
-
-            withdraw(&e, &pool, &asset, &samwise, 0);
-        });
-    }
-
-    #[test]
-    #[should_panic(expected = "Error(Contract, #105)")]
-    fn test_withdraw_more_b_tokens_than_vault() {
-        let e = Env::default();
-        e.mock_all_auths();
-
-        let bombadil = Address::generate(&e);
-        let samwise = Address::generate(&e);
-        let (vault_address, pool, asset) = create_test_blend_vault(&e, &bombadil, None);
-
-        e.as_contract(&vault_address, || {
-            let vault_data = VaultData {
-                total_b_tokens: 1000_0000000,
-                total_shares: 1200_0000000,
-                b_rate: 1_100_000_000_000,
-                last_update_timestamp: e.ledger().timestamp(),
-            };
-            storage::set_vault_data(&e, &vault_data);
-
-            storage::set_vault_shares(&e, &samwise, vault_data.total_shares + 10);
-            let withdraw_amount = vault_data.b_tokens_to_underlying_down(1000_0000000);
-
-            withdraw(&e, &pool, &asset, &samwise, withdraw_amount + 1);
-        });
-    }
-
-    #[test]
-    fn test_withdraw_exact_balance() {
-        let e = Env::default();
-        e.mock_all_auths();
-
-        let bombadil = Address::generate(&e);
-        let samwise = Address::generate(&e);
-        let (vault_address, pool, asset) = create_test_blend_vault(&e, &bombadil, None);
-
-        e.as_contract(&vault_address, || {
-            let vault_data = VaultData {
-                total_b_tokens: 1000_0000000,
-                total_shares: 1200_0000000,
-                b_rate: 1_100_000_000_000,
-                last_update_timestamp: e.ledger().timestamp(),
-            };
-            storage::set_vault_data(&e, &vault_data);
-
-            let sam_shares = 1000_0000000;
-            storage::set_vault_shares(&e, &samwise, sam_shares);
-            let sam_b_tokens: i128 =
-                vault_data.shares_to_b_tokens_down(storage::get_vault_shares(&e, &samwise));
-            let sam_underlying_balance = vault_data.b_tokens_to_underlying_down(sam_b_tokens);
-
-            // Withdraw whole underlying balance as read by the contract
-            let (underlying_withdrawn, b_tokens_burnt, shares_burnt) =
-                withdraw(&e, &pool, &asset, &samwise, sam_underlying_balance);
-            assert_eq!(underlying_withdrawn, sam_underlying_balance);
-            assert_eq!(b_tokens_burnt, sam_b_tokens);
-            assert_eq!(shares_burnt, sam_shares);
-            assert_eq!(storage::get_vault_shares(&e, &samwise), 0);
-        });
-    }
-
-    #[test]
-    fn test_withdraw_over_balance() {
-        let e = Env::default();
-        e.mock_all_auths();
-
-        let bombadil = Address::generate(&e);
-        let samwise = Address::generate(&e);
-        let (vault_address, pool, asset) = create_test_blend_vault(&e, &bombadil, None);
-
-        e.as_contract(&vault_address, || {
-            let vault_data = VaultData {
-                total_b_tokens: 1000_0000000,
-                total_shares: 1200_0000000,
-                b_rate: 1_100_000_000_000,
-                last_update_timestamp: e.ledger().timestamp(),
-            };
-            storage::set_vault_data(&e, &vault_data);
-
-            let sam_shares = 1000_0000000;
-            storage::set_vault_shares(&e, &samwise, sam_shares);
-            let sam_b_tokens: i128 =
-                vault_data.shares_to_b_tokens_down(storage::get_vault_shares(&e, &samwise));
-            let sam_underlying_balance = vault_data.b_tokens_to_underlying_down(sam_b_tokens);
-
-            // Try to withdraw 1 more than `sam_underlying_balance`
-            let (underlying_withdrawn, b_tokens_burnt, shares_burnt) =
-                withdraw(&e, &pool, &asset, &samwise, sam_underlying_balance + 1);
-            // Pulls back down to `sam_underlying_balance`
-            assert_eq!(underlying_withdrawn, sam_underlying_balance);
-            assert_eq!(b_tokens_burnt, sam_b_tokens);
-            assert_eq!(shares_burnt, sam_shares);
-            assert_eq!(storage::get_vault_shares(&e, &samwise), 0);
-        });
-    }
-
-    #[test]
-    fn test_withdraw_over_balance_full_vault() {
-        let e = Env::default();
-        e.mock_all_auths();
-
-        let bombadil = Address::generate(&e);
-        let samwise = Address::generate(&e);
-        let (vault_address, pool, asset) = create_test_blend_vault(&e, &bombadil, None);
-
-        e.as_contract(&vault_address, || {
-            let vault_data = VaultData {
-                total_b_tokens: 1000_0000000,
-                total_shares: 1200_0000000,
-                b_rate: 1_100_000_000_000,
-                last_update_timestamp: e.ledger().timestamp(),
-            };
-            storage::set_vault_data(&e, &vault_data);
-
-            let sam_shares = 1200_0000000;
-            storage::set_vault_shares(&e, &samwise, sam_shares);
-            let sam_b_tokens: i128 =
-                vault_data.shares_to_b_tokens_down(storage::get_vault_shares(&e, &samwise));
-            let sam_underlying_balance = vault_data.b_tokens_to_underlying_down(sam_b_tokens);
-
-            let (underlying_withdrawn, b_tokens_burnt, shares_burnt) =
-                withdraw(&e, &pool, &asset, &samwise, i64::MAX as i128);
-            // Pulls back down to `sam_underlying_balance`
-            assert_eq!(underlying_withdrawn, sam_underlying_balance);
-            assert_eq!(b_tokens_burnt, sam_b_tokens);
-            assert_eq!(shares_burnt, sam_shares);
-            assert_eq!(storage::get_vault_shares(&e, &samwise), 0);
+            assert_eq!(Base::balance(&e, &samwise), 0);
             let vault_data = storage::get_vault_data(&e);
             assert_eq!(vault_data.total_b_tokens, 0);
             assert_eq!(vault_data.total_shares, 0);
+        });
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #100)")]
+    fn test_redeem_over_balance() {
+        let e = Env::default();
+        e.mock_all_auths();
+
+        let bombadil = Address::generate(&e);
+        let samwise = Address::generate(&e);
+        let (vault_address, pool, asset) = create_test_blend_vault(&e, &bombadil, None);
+
+        e.as_contract(&vault_address, || {
+            let vault_data = VaultData {
+                total_b_tokens: 1000_0000000,
+                total_shares: 1200_0000000,
+                b_rate: 1_100_000_000_000,
+                last_update_timestamp: e.ledger().timestamp(),
+            };
+            storage::set_vault_data(&e, &vault_data);
+            Base::mint(&e, &samwise, 100_0000000);
+
+            redeem(&e, &pool, &asset, &samwise, 100_0000001);
+        });
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #200)")]
+    fn test_redeem_more_shares_than_vault() {
+        let e = Env::default();
+        e.mock_all_auths();
+
+        let bombadil = Address::generate(&e);
+        let samwise = Address::generate(&e);
+        let (vault_address, pool, asset) = create_test_blend_vault(&e, &bombadil, None);
+
+        e.as_contract(&vault_address, || {
+            let vault_data = VaultData {
+                total_b_tokens: 1000_0000000,
+                total_shares: 1200_0000000,
+                b_rate: 1_100_000_000_000,
+                last_update_timestamp: e.ledger().timestamp(),
+            };
+            storage::set_vault_data(&e, &vault_data);
+            // an unreachable state: more shares held than the vault issued
+            Base::mint(&e, &samwise, vault_data.total_shares + 10);
+
+            redeem(&e, &pool, &asset, &samwise, vault_data.total_shares + 1);
         });
     }
 
@@ -881,7 +684,8 @@ mod generic_tests {
 
         let init_b_rate = 1_100_000_000_000;
         let bombadil = Address::generate(&e);
-        let (vault_address, pool, asset) = create_test_blend_vault(&e, &bombadil, Some(init_b_rate));
+        let (vault_address, pool, asset) =
+            create_test_blend_vault(&e, &bombadil, Some(init_b_rate));
 
         let mock_client = MockPoolClient::new(&e, &pool);
 
@@ -914,7 +718,8 @@ mod generic_tests {
 
         let init_b_rate = 1_100_000_000_000;
         let bombadil = Address::generate(&e);
-        let (vault_address, pool, asset) = create_test_blend_vault(&e, &bombadil, Some(init_b_rate));
+        let (vault_address, pool, asset) =
+            create_test_blend_vault(&e, &bombadil, Some(init_b_rate));
 
         e.as_contract(&vault_address, || {
             let now = e.ledger().timestamp();
@@ -940,7 +745,8 @@ mod generic_tests {
 
         let init_b_rate = 1_100_000_000_000;
         let bombadil = Address::generate(&e);
-        let (vault_address, pool, asset) = create_test_blend_vault(&e, &bombadil, Some(init_b_rate));
+        let (vault_address, pool, asset) =
+            create_test_blend_vault(&e, &bombadil, Some(init_b_rate));
 
         e.as_contract(&vault_address, || {
             let now = e.ledger().timestamp();
@@ -970,7 +776,8 @@ mod generic_tests {
 
         let init_b_rate = 1_100_000_000_000;
         let bombadil = Address::generate(&e);
-        let (vault_address, pool, asset) = create_test_blend_vault(&e, &bombadil, Some(init_b_rate));
+        let (vault_address, pool, asset) =
+            create_test_blend_vault(&e, &bombadil, Some(init_b_rate));
         let mock_client = MockPoolClient::new(&e, &pool);
 
         e.as_contract(&vault_address, || {

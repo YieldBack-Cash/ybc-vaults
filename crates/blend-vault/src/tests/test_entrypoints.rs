@@ -1,16 +1,18 @@
 #![cfg(test)]
 
 use crate::{
-    constants::SCALAR_12,
     storage,
-    testutils::{assert_approx_eq_rel, mockpool, register_blend_vault, EnvTestUtils},
+    testutils::{
+        create_funded_blend_vault, mockpool, register_blend_vault, EnvTestUtils, MockTokenClient,
+    },
     vault::VaultData,
     BlendVaultClient,
 };
 use soroban_sdk::{
     testutils::{Address as _, AuthorizedFunction, AuthorizedInvocation},
-    vec, Address, Env, IntoVal, Symbol,
+    vec, Address, Env, IntoVal, String, Symbol,
 };
+use stellar_tokens::fungible::Base;
 
 const INIT_B_RATE: i128 = 1_000_000_000_000;
 
@@ -39,8 +41,8 @@ fn seed_vault_positions(e: &Env, vault_address: &Address, samwise: &Address, fro
             last_update_timestamp: e.ledger().timestamp(),
         };
         storage::set_vault_data(e, &vault_data);
-        storage::set_vault_shares(e, samwise, 120_0000000);
-        storage::set_vault_shares(e, frodo, 1080_0000000);
+        Base::mint(e, samwise, 120_0000000);
+        Base::mint(e, frodo, 1080_0000000);
     });
 }
 
@@ -50,14 +52,25 @@ fn test_constructor_ok() {
     e.mock_all_auths();
 
     let samwise = Address::generate(&e);
-    let frodo = Address::generate(&e);
 
     // registered inline (not via `setup`) so the constructor args can be
     // asserted against the recorded authorization below
     let pool = mockpool::register_mock_pool_with_b_rate(&e, INIT_B_RATE).address;
     let reserve = Address::generate(&e);
     let blnd_token = Address::generate(&e);
-    let vault_address = register_blend_vault(&e, &samwise, &pool, &reserve, &blnd_token);
+    let name = String::from_str(&e, "Blend Vault Share");
+    let symbol = String::from_str(&e, "bVS");
+    let vault_address = e.register(
+        crate::BlendVault {},
+        (
+            samwise.clone(),
+            pool.clone(),
+            reserve.clone(),
+            blnd_token.clone(),
+            name.clone(),
+            symbol.clone(),
+        ),
+    );
 
     assert_eq!(
         e.auths()[0],
@@ -73,6 +86,8 @@ fn test_constructor_ok() {
                         pool.into_val(&e),
                         reserve.into_val(&e),
                         blnd_token.into_val(&e),
+                        name.into_val(&e),
+                        symbol.into_val(&e),
                     ]
                 )),
                 sub_invocations: std::vec![]
@@ -81,12 +96,13 @@ fn test_constructor_ok() {
     );
 
     let client = BlendVaultClient::new(&e, &vault_address);
-    client.set_signer(&Some(frodo.clone()));
-
     assert_eq!(client.get_config(), (pool.clone(), reserve.clone()));
     assert_eq!(client.query_asset(), reserve);
     assert_eq!(client.get_admin(), samwise);
-    assert_eq!(client.get_signer(), Some(frodo));
+    assert_eq!(client.decimals(), 7);
+    assert_eq!(client.name(), name);
+    assert_eq!(client.symbol(), symbol);
+    assert_eq!(client.total_supply(), 0);
     let vault_data = client.get_vault();
     assert_eq!(vault_data.total_b_tokens, 0);
     assert_eq!(vault_data.total_shares, 0);
@@ -129,8 +145,10 @@ fn test_get_b_tokens() {
     assert_eq!(vault_client.get_b_tokens(&non_existent_user), 0);
 }
 
+/// `max_withdraw` is the holder's share of the vault's underlying value and
+/// grows with the rate; `total_assets` is the whole vault's.
 #[test]
-fn test_underlying_wrappers() {
+fn test_max_withdraw_and_total_assets() {
     let e = Env::default();
     e.mock_all_auths();
     e.set_default_info();
@@ -141,36 +159,48 @@ fn test_underlying_wrappers() {
     let (vault_address, vault_client, mock_client) = setup(&e, &samwise);
     seed_vault_positions(&e, &vault_address, &samwise, &frodo);
 
-    let total_underlying_value = INIT_B_RATE * 1000_0000000 / SCALAR_12;
-    let frodo_underlying = vault_client.get_underlying_tokens(&frodo);
-    let samwise_underlying = vault_client.get_underlying_tokens(&samwise);
-
-    assert_eq!(
-        frodo_underlying + samwise_underlying,
-        total_underlying_value
-    );
-    assert_eq!(frodo_underlying, 9 * samwise_underlying);
+    let total = 1000_0000000; // 1000 bTokens at b_rate 1.0
+    assert_eq!(vault_client.total_assets(), total);
+    let frodo_value = vault_client.max_withdraw(&frodo);
+    let samwise_value = vault_client.max_withdraw(&samwise);
+    assert_eq!(frodo_value + samwise_value, total);
+    assert_eq!(frodo_value, 9 * samwise_value);
 
     // b_rate increases by 10%; all yield goes to depositors with no fee
     mock_client.set_b_rate(&1_100_000_000_000);
     e.jump(5);
 
-    let sam_underlying_after = vault_client.get_underlying_tokens(&samwise);
-    let frodo_underlying_after = vault_client.get_underlying_tokens(&frodo);
-
-    // Each depositor earns the full 10% gain
-    assert_approx_eq_rel(
-        frodo_underlying_after + sam_underlying_after,
-        110 * total_underlying_value / 100,
-        0_0000001,
+    assert_eq!(vault_client.total_assets(), 110 * total / 100);
+    assert_eq!(vault_client.max_withdraw(&frodo), 110 * frodo_value / 100);
+    assert_eq!(
+        vault_client.max_withdraw(&samwise),
+        110 * samwise_value / 100
     );
-    assert_eq!(frodo_underlying_after, 110 * frodo_underlying / 100);
-    assert_eq!(sam_underlying_after, 110 * samwise_underlying / 100);
-    assert_eq!(frodo_underlying_after, 9 * sam_underlying_after);
 
-    // Ensure the view function never panics
     let non_existent_user = Address::generate(&e);
-    assert_eq!(vault_client.get_underlying_tokens(&non_existent_user), 0);
+    assert_eq!(vault_client.max_withdraw(&non_existent_user), 0);
+}
+
+/// Against a real pool, `max_deposit` is the reserve's remaining supply cap.
+#[test]
+fn test_max_deposit_reports_reserve_headroom() {
+    let e = Env::default();
+    let (vault, usdc) = create_funded_blend_vault(&e);
+    let vault_client = BlendVaultClient::new(&e, &vault);
+    let user = Address::generate(&e);
+
+    let before = vault_client.max_deposit(&user);
+    assert!(before > 0);
+    assert_eq!(vault_client.total_assets(), 0);
+
+    let deposit = 1_000_0000000;
+    MockTokenClient::new(&e, &usdc).mint(&user, &deposit);
+    vault_client.deposit(&deposit, &user, &user, &user);
+
+    // the deposit consumed exactly its size of headroom, give or take rounding
+    let after = vault_client.max_deposit(&user);
+    assert!(before - after >= deposit - 1 && before - after <= deposit + 1);
+    assert!(vault_client.total_assets() >= deposit - 1);
 }
 
 #[test]
@@ -227,62 +257,4 @@ fn test_set_admin() {
             (new_admin.clone(), new_authorized_function)
         ]
     );
-}
-
-#[test]
-fn test_set_signer() {
-    let e = Env::default();
-    e.mock_all_auths();
-
-    let samwise = Address::generate(&e);
-    let frodo = Address::generate(&e);
-    let merry = Address::generate(&e);
-
-    let (vault_address, vault_client, _mock_client) = setup(&e, &samwise);
-    vault_client.set_signer(&Some(merry.clone()));
-
-    e.as_contract(&vault_address, || {
-        assert_eq!(storage::get_signer(&e), Some(merry.clone()));
-    });
-
-    vault_client.set_signer(&Some(frodo.clone()));
-
-    let authorized_function = AuthorizedInvocation {
-        function: AuthorizedFunction::Contract((
-            vault_address.clone(),
-            Symbol::new(&e, "set_signer"),
-            vec![&e, Some(frodo.clone()).into_val(&e)],
-        )),
-        sub_invocations: std::vec![],
-    };
-    assert_eq!(
-        e.auths(),
-        std::vec![
-            (samwise.clone(), authorized_function.clone()),
-            (frodo.clone(), authorized_function)
-        ]
-    );
-
-    e.as_contract(&vault_address, || {
-        assert_eq!(storage::get_signer(&e), Some(frodo.clone()));
-    });
-
-    // validate signer removal
-    vault_client.set_signer(&None);
-    let authorized_function = AuthorizedInvocation {
-        function: AuthorizedFunction::Contract((
-            vault_address.clone(),
-            Symbol::new(&e, "set_signer"),
-            vec![&e, None::<Address>.into_val(&e)],
-        )),
-        sub_invocations: std::vec![],
-    };
-    assert_eq!(
-        e.auths(),
-        std::vec![(samwise.clone(), authorized_function.clone()),]
-    );
-
-    e.as_contract(&vault_address, || {
-        assert_eq!(storage::get_signer(&e), None);
-    });
 }

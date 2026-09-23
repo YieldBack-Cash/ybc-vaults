@@ -1,17 +1,17 @@
 #![cfg(test)]
 
+//! A pool default: the reserve's `b_rate` falls and every holder's redeemable
+//! value falls with it. The vault must report the loss, not hide it.
+
+use crate::blend::pool::{Client as PoolClient, PoolDataKey};
 use crate::constants::{SCALAR_12, SCALAR_7};
 use crate::testutils::{
-    assert_approx_eq_abs, create_blend_pool, register_blend_vault, setup_pool_util_rate,
-    EnvTestUtils,
+    assert_approx_eq_abs, create_blend_pool, fixed_div_floor, fixed_mul_floor,
+    register_blend_vault, setup_pool_util_rate, BlendFixture, EnvTestUtils, MockTokenClient,
 };
 use crate::BlendVaultClient;
-use blend_contract_sdk::pool::{Client as PoolClient, PoolDataKey};
-use blend_contract_sdk::testutils::BlendFixture;
-use sep_41_token::testutils::MockTokenClient;
-use soroban_fixed_point_math::FixedPoint;
 use soroban_sdk::testutils::Address as _;
-use soroban_sdk::{unwrap::UnwrapOptimized, Address, Env};
+use soroban_sdk::{Address, Env};
 
 #[test]
 fn test_default() {
@@ -43,30 +43,24 @@ fn test_default() {
     let pool = create_blend_pool(&e, &blend_fixture, &bombadil, &usdc_client, &xlm_client);
     let pool_client = PoolClient::new(&e, &pool);
     let blend_vault = register_blend_vault(&e, &bombadil, &pool, &usdc, &blnd);
-    let blend_vault_usdc_client = BlendVaultClient::new(&e, &blend_vault);
+    let vault_client = BlendVaultClient::new(&e, &blend_vault);
 
     // Bombadil deposits 200k tokens and borrows 105k usdc for a ~52% util rate
     setup_pool_util_rate(&e, &pool, &bombadil, &usdc, &xlm, 105_000_0000000);
 
     let pool_usdc_balance_start = usdc_client.balance(&pool);
 
-    // have samwise and frodo deposit funds into reserve vault
+    // have samwise and frodo deposit funds into the vault
     let samwise_deposit: i128 = 1_000_0000000;
     let frodo_deposit: i128 = 9_000_0000000;
     usdc_client.mint(&samwise, &(samwise_deposit * 2));
     usdc_client.mint(&frodo, &(frodo_deposit * 2));
 
-    blend_vault_usdc_client.deposit(&samwise_deposit, &samwise, &samwise, &samwise);
-    blend_vault_usdc_client.deposit(&frodo_deposit, &frodo, &frodo, &frodo);
+    vault_client.deposit(&samwise_deposit, &samwise, &samwise, &samwise);
+    vault_client.deposit(&frodo_deposit, &frodo, &frodo, &frodo);
 
-    assert_eq!(
-        blend_vault_usdc_client.get_underlying_tokens(&samwise),
-        samwise_deposit
-    );
-    assert_eq!(
-        blend_vault_usdc_client.get_underlying_tokens(&frodo),
-        frodo_deposit
-    );
+    assert_eq!(vault_client.max_withdraw(&samwise), samwise_deposit);
+    assert_eq!(vault_client.max_withdraw(&frodo), frodo_deposit);
     assert_eq!(
         usdc_client.balance(&pool),
         pool_usdc_balance_start + samwise_deposit + frodo_deposit
@@ -76,55 +70,52 @@ fn test_default() {
     e.jump_time(30 * 86400);
 
     // have frodo do a 10 stroop deposit to trigger a b_rate update this block
-    blend_vault_usdc_client.deposit(&10, &frodo, &frodo, &frodo);
+    vault_client.deposit(&10, &frodo, &frodo, &frodo);
 
     // snapshot underlying values before the default
-    let pre_default_frodo = blend_vault_usdc_client.get_underlying_tokens(&frodo);
-    let pre_default_samwise = blend_vault_usdc_client.get_underlying_tokens(&samwise);
+    let pre_default_frodo = vault_client.max_withdraw(&frodo);
+    let pre_default_samwise = vault_client.max_withdraw(&samwise);
     assert!(pre_default_frodo > frodo_deposit, "yield must have accrued");
 
     let usdc_data = pool_client.get_reserve(&usdc);
-    let pre_supply = usdc_data
-        .data
-        .b_rate
-        .fixed_mul_floor(usdc_data.data.b_supply, SCALAR_12)
-        .unwrap_optimized();
+    let pre_supply = fixed_mul_floor(usdc_data.data.b_rate, usdc_data.data.b_supply, SCALAR_12);
     // use magic to simulate a default situation of 10%
     e.as_contract(&pool, || {
         let res_data_key = PoolDataKey::ResData(usdc.clone());
         let mut new_res_data = usdc_data.data.clone();
-        new_res_data.b_rate = new_res_data
-            .b_rate
-            .fixed_mul_floor(0_9000000, SCALAR_7)
-            .unwrap_optimized();
-        let new_supply = new_res_data
-            .b_supply
-            .fixed_mul_floor(new_res_data.b_rate, SCALAR_12)
-            .unwrap_optimized();
-        new_res_data.d_supply = (pre_supply - new_supply)
-            .fixed_div_floor(new_res_data.d_rate, SCALAR_12)
-            .unwrap_optimized();
+        new_res_data.b_rate = fixed_mul_floor(new_res_data.b_rate, 0_9000000, SCALAR_7);
+        let new_supply = fixed_mul_floor(new_res_data.b_supply, new_res_data.b_rate, SCALAR_12);
+        new_res_data.d_supply =
+            fixed_div_floor(pre_supply - new_supply, new_res_data.d_rate, SCALAR_12);
         e.storage().persistent().set(&res_data_key, &new_res_data);
     });
 
     // estimate expected loss: 10% b_rate drop applied to pre-default underlying
-    let expected_frodo_loss = pre_default_frodo
-        .fixed_mul_floor(0_9000000, SCALAR_7)
-        .unwrap_optimized();
-    let expected_samwise_loss = pre_default_samwise
-        .fixed_mul_floor(0_9000000, SCALAR_7)
-        .unwrap_optimized();
+    let expected_frodo_value = fixed_mul_floor(pre_default_frodo, 0_9000000, SCALAR_7);
+    let expected_samwise_value = fixed_mul_floor(pre_default_samwise, 0_9000000, SCALAR_7);
 
-    // withdraw frodo at the same time and check he took expected loss
-    let frodo_withdraw_amount = blend_vault_usdc_client.get_underlying_tokens(&frodo);
-    blend_vault_usdc_client.withdraw(&frodo_withdraw_amount, &frodo, &frodo, &frodo);
-    assert_approx_eq_abs(frodo_withdraw_amount, expected_frodo_loss, 0_0010000);
+    // the vault reports the loss immediately
+    assert_approx_eq_abs(
+        vault_client.max_withdraw(&frodo),
+        expected_frodo_value,
+        0_0010000,
+    );
+
+    // frodo exits and takes the expected loss
+    let frodo_before = usdc_client.balance(&frodo);
+    let frodo_paid = vault_client.redeem(&vault_client.balance(&frodo), &frodo, &frodo, &frodo);
+    assert_approx_eq_abs(frodo_paid, expected_frodo_value, 0_0010000);
+    assert_eq!(usdc_client.balance(&frodo), frodo_before + frodo_paid);
 
     // skip some time
     e.jump_time(100);
 
-    // withdraw samwise and check loss
-    let samwise_withdraw_amount = blend_vault_usdc_client.get_underlying_tokens(&samwise);
-    blend_vault_usdc_client.withdraw(&samwise_withdraw_amount, &samwise, &samwise, &samwise);
-    assert_approx_eq_abs(samwise_withdraw_amount, expected_samwise_loss, 0_0010000);
+    // samwise exits and takes the expected loss
+    let samwise_paid = vault_client.redeem(
+        &vault_client.balance(&samwise),
+        &samwise,
+        &samwise,
+        &samwise,
+    );
+    assert_approx_eq_abs(samwise_paid, expected_samwise_value, 0_0010000);
 }

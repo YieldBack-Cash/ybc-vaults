@@ -1,9 +1,7 @@
 use crate::{
+    constants::SCALAR_12,
     errors::BlendVaultError,
-    events::BlendVaultEvents,
-    pool, storage, swap,
-    summary::VaultSummary,
-    validator::require_positive,
+    events, pool, storage, swap,
     vault::{self, VaultData},
 };
 
@@ -11,47 +9,36 @@ use soroban_sdk::{
     auth::{ContractContext, InvokerContractAuthEntry, SubContractInvocation},
     contract, contractimpl, panic_with_error, vec, Address, Env, IntoVal, String, Symbol,
 };
+use stellar_tokens::fungible::Base;
+use vault_common::{
+    auth::spend_operator_allowance, events as shared_events, guard::require_positive,
+    math::mul_div_floor, sweep, ttl,
+};
 
 #[contract]
 pub struct BlendVault;
 
-/// Authorizes `operator` to burn `shares` of `owner`'s position.
-///
-/// The caller has already established that `operator` authorized the call. When
-/// `operator` is not `owner`, it must additionally hold a SEP-41 allowance from
-/// `owner` covering `shares`, which is consumed here — the same delegation
-/// `transfer_from` uses, and the ERC-4626/SEP-56 rule for a third-party
-/// `operator`. Without this, `operator` is the only authenticated party in the
-/// call and any address could name an arbitrary `owner`.
-///
-/// Note the early return rather than an unconditional `owner.require_auth()`:
-/// a second `require_auth` on an address already authorized in the same frame
-/// is a host error (`Auth, ExistingValue`), not a no-op.
-fn spend_operator_allowance(e: &Env, owner: &Address, operator: &Address, shares: i128) {
-    if owner == operator {
-        return;
-    }
-    let (allowance, expiration) = storage::get_allowance_with_expiration(e, owner, operator);
-    if allowance < shares {
-        panic_with_error!(e, BlendVaultError::BalanceError);
-    }
-    storage::set_allowance(e, owner, operator, allowance - shares, expiration);
-}
+// SEP-41 on the same address as the SEP-56 surface, delegated to OpenZeppelin.
+vault_common::impl_share_token!(BlendVault);
 
 #[contractimpl]
 impl BlendVault {
-    /// Initializes the contract with an admin, blend pool, and asset.
+    /// Initializes the vault over one reserve of one Blend pool.
     ///
     /// ### Arguments
-    /// * `admin` - The admin address
-    /// * `pool` - The Blend pool the vault will deposit into
+    /// * `admin` - Authorized for `set_admin`, `set_router` and `sweep`
+    /// * `pool` - The Blend pool the vault will supply into
     /// * `asset` - The reserve asset the vault supports
+    /// * `blnd_token` - The BLND token, for emissions harvesting
+    /// * `name`, `symbol` - Share token metadata; decimals are always 7
     pub fn __constructor(
         e: Env,
         admin: Address,
         pool: Address,
         asset: Address,
         blnd_token: Address,
+        name: String,
+        symbol: String,
     ) {
         admin.require_auth();
 
@@ -69,38 +56,23 @@ impl BlendVault {
                 total_b_tokens: 0,
             },
         );
+
+        // 7 decimals matches the underlying Stellar asset contract and the
+        // 1e7 fixed-point scale consumers assume.
+        Base::set_metadata(&e, 7, name, symbol);
+        ttl::extend_instance_ttl(&e);
     }
 
-    //********** Read-Only ***********//
+    // ── SEP-56 ──────────────────────────────────────────────────────────────
 
-    /// Returns `user`'s position in shares.
-    ///
-    /// ### Arguments
-    /// * `user` - The address to query
-    pub fn get_shares(e: Env, user: Address) -> i128 {
-        storage::get_vault_shares(&e, &user)
+    pub fn query_asset(e: Env) -> Address {
+        storage::get_asset(&e)
     }
 
-    /// Returns `user`'s position in bTokens.
-    ///
-    /// ### Arguments
-    /// * `user` - The address to query
-    pub fn get_b_tokens(e: Env, user: Address) -> i128 {
-        let shares = storage::get_vault_shares(&e, &user);
-        if shares > 0 {
-            let pool = storage::get_pool(&e);
-            let asset = storage::get_asset(&e);
-            let vault = vault::get_vault_updated(&e, &pool, &asset);
-            vault.shares_to_b_tokens_down(shares)
-        } else {
-            0
-        }
-    }
-
-    /// Converts a share amount to underlying tokens.
-    ///
-    /// ### Arguments
-    /// * `shares` - The share amount to convert
+    /// Converts a share amount to underlying tokens: shares to bTokens through
+    /// the vault's ratio, then bTokens to underlying through the pool's
+    /// `b_rate`. Both round down. Positive on an empty vault (1:1 through
+    /// `b_rate`), so a consumer probing the rate at market creation succeeds.
     pub fn convert_to_assets(e: Env, shares: i128) -> i128 {
         if shares <= 0 {
             return 0;
@@ -108,212 +80,138 @@ impl BlendVault {
         let pool = storage::get_pool(&e);
         let asset = storage::get_asset(&e);
         let vault = vault::get_vault_updated(&e, &pool, &asset);
-        let b_tokens = vault.shares_to_b_tokens_down(shares);
-        vault.b_tokens_to_underlying_down(b_tokens)
+        let b_tokens = vault.shares_to_b_tokens_down(&e, shares);
+        vault.b_tokens_to_underlying_down(&e, b_tokens)
     }
 
-    /// Returns `user`'s position in underlying tokens.
-    ///
-    /// ### Arguments
-    /// * `user` - The address to query
-    pub fn get_underlying_tokens(e: Env, user: Address) -> i128 {
-        let shares = storage::get_vault_shares(&e, &user);
-        if shares > 0 {
-            let pool = storage::get_pool(&e);
-            let asset = storage::get_asset(&e);
-            let vault = vault::get_vault_updated(&e, &pool, &asset);
-            let b_tokens = vault.shares_to_b_tokens_down(shares);
-            vault.b_tokens_to_underlying_down(b_tokens)
-        } else {
-            0
-        }
-    }
-
-    /// Returns the vault's blend pool and asset addresses.
-    pub fn get_config(e: Env) -> (Address, Address) {
-        (storage::get_pool(&e), storage::get_asset(&e))
-    }
-
-    /// Returns the underlying asset address. SEP-56 compatible.
-    pub fn query_asset(e: Env) -> Address {
-        storage::get_asset(&e)
-    }
-
-    /// Returns the current vault data with an up-to-date bRate.
-    pub fn get_vault(e: Env) -> VaultData {
+    /// Underlying value of the vault's whole bToken position.
+    pub fn total_assets(e: Env) -> i128 {
         let pool = storage::get_pool(&e);
         let asset = storage::get_asset(&e);
-        vault::get_vault_updated(&e, &pool, &asset)
+        let vault = vault::get_vault_updated(&e, &pool, &asset);
+        vault.b_tokens_to_underlying_down(&e, vault.total_b_tokens)
     }
 
-    /// Returns the vault's admin address.
-    pub fn get_admin(e: Env) -> Address {
-        storage::get_admin(&e)
-    }
-
-    /// Returns the vault's signer address, or `None` if no signer is set.
-    pub fn get_signer(e: Env) -> Option<Address> {
-        storage::get_signer(&e)
-    }
-
-    /// Returns a vault summary for offchain display (e.g. dApp). Not for onchain use.
-    pub fn get_vault_summary(e: Env) -> VaultSummary {
-        VaultSummary::load(&e)
-    }
-
-    //********** SEP-41 Token Interface ***********//
-
-    /// Returns the share balance of `id`.
-    ///
-    /// ### Arguments
-    /// * `id` - The address to query
-    pub fn balance(e: Env, id: Address) -> i128 {
-        storage::get_vault_shares(&e, &id)
-    }
-
-    /// Returns the number of decimals used by vault shares
-    pub fn decimals(_e: Env) -> u32 {
-        7
-    }
-
-    /// Returns the name of the vault share token
-    pub fn name(e: Env) -> String {
-        String::from_str(&e, "Blend Vault Share")
-    }
-
-    /// Returns the symbol of the vault share token
-    pub fn symbol(e: Env) -> String {
-        String::from_str(&e, "bVS")
-    }
-
-    /// Returns the approved allowance for `spender` to transfer shares from `from`.
-    ///
-    /// ### Arguments
-    /// * `from` - The address owning the shares
-    /// * `spender` - The address approved to spend
-    pub fn allowance(e: Env, from: Address, spender: Address) -> i128 {
-        storage::get_allowance(&e, &from, &spender)
-    }
-
-    /// Approves `spender` to transfer up to `amount` shares from `from` until `expiration_ledger`.
-    ///
-    /// ### Arguments
-    /// * `from` - The address owning the shares
-    /// * `spender` - The address being approved
-    /// * `amount` - The maximum shares the spender may transfer
-    /// * `expiration_ledger` - The ledger sequence at which the approval expires
-    pub fn approve(e: Env, from: Address, spender: Address, amount: i128, expiration_ledger: u32) {
-        from.require_auth();
-        storage::set_allowance(&e, &from, &spender, amount, expiration_ledger);
-        BlendVaultEvents::approve(&e, &from, &spender, amount, expiration_ledger);
-    }
-
-    /// Transfers `amount` shares from `from` to `to`.
-    ///
-    /// ### Arguments
-    /// * `from` - The address sending shares
-    /// * `to` - The address receiving shares
-    /// * `amount` - The number of shares to transfer
-    pub fn transfer(e: Env, from: Address, to: Address, amount: i128) {
-        from.require_auth();
-        require_positive(&e, amount, BlendVaultError::InvalidAmount);
-
-        let from_shares = storage::get_vault_shares(&e, &from);
-        if from_shares < amount {
-            panic_with_error!(&e, BlendVaultError::BalanceError);
+    /// Remaining room under the reserve's supply cap, in assets, or 0 when the
+    /// pool is frozen or the reserve disabled. The cap is pool-wide, so this
+    /// is the shared headroom: another supplier consuming it first is exactly
+    /// what would make a deposit revert.
+    pub fn max_deposit(e: Env, _receiver: Address) -> i128 {
+        let pool = storage::get_pool(&e);
+        let asset = storage::get_asset(&e);
+        if pool::status(&e, &pool) >= 4 {
+            return 0;
         }
-
-        // Debit first, then read the credit side. When `from == to` both are
-        // the same key, so reading `to_shares` up front would let the credit
-        // overwrite the debit and mint `amount` shares out of nothing.
-        storage::set_vault_shares(&e, &from, from_shares - amount);
-        let to_shares = storage::get_vault_shares(&e, &to);
-        storage::set_vault_shares(&e, &to, to_shares + amount);
-
-        BlendVaultEvents::transfer(&e, &from, &to, amount);
+        let reserve = pool::reserve(&e, &pool, &asset);
+        if !reserve.config.enabled {
+            return 0;
+        }
+        let supplied = mul_div_floor(&e, reserve.data.b_supply, reserve.data.b_rate, SCALAR_12);
+        if reserve.config.supply_cap <= supplied {
+            0
+        } else {
+            reserve.config.supply_cap - supplied
+        }
     }
 
-    /// Transfers `amount` shares from `from` to `to` using `spender`'s allowance.
+    /// What `owner` could redeem right now, in assets.
+    pub fn max_withdraw(e: Env, owner: Address) -> i128 {
+        let balance = Base::balance(&e, &owner);
+        Self::convert_to_assets(e, balance)
+    }
+
+    /// Supplies `assets` from `from` into the pool and mints the resulting
+    /// shares to `receiver`.
     ///
-    /// ### Arguments
-    /// * `spender` - The address whose allowance is consumed
-    /// * `from` - The address sending shares
-    /// * `to` - The address receiving shares
-    /// * `amount` - The number of shares to transfer
-    pub fn transfer_from(e: Env, spender: Address, from: Address, to: Address, amount: i128) {
-        spender.require_auth();
-        require_positive(&e, amount, BlendVaultError::InvalidAmount);
+    /// ### Returns
+    /// * `i128` - The number of shares minted to the receiver
+    pub fn deposit(
+        e: Env,
+        assets: i128,
+        receiver: Address,
+        from: Address,
+        operator: Address,
+    ) -> i128 {
+        require_positive(&e, assets);
+        operator.require_auth();
+        ttl::extend_instance_ttl(&e);
 
-        let (allowance, expiration) = storage::get_allowance_with_expiration(&e, &from, &spender);
-        if allowance < amount {
-            panic_with_error!(&e, BlendVaultError::BalanceError);
-        }
+        let pool = storage::get_pool(&e);
+        let asset = storage::get_asset(&e);
+        pool::supply(&e, &pool, &asset, &from, assets);
+        let (_, new_shares) = vault::deposit(&e, &pool, &asset, &receiver, assets);
 
-        let from_shares = storage::get_vault_shares(&e, &from);
-        if from_shares < amount {
-            panic_with_error!(&e, BlendVaultError::BalanceError);
-        }
-
-        storage::set_allowance(&e, &from, &spender, allowance - amount, expiration);
-
-        // Debit before reading the credit side — see `transfer` for why a
-        // self-transfer would otherwise mint shares.
-        storage::set_vault_shares(&e, &from, from_shares - amount);
-        let to_shares = storage::get_vault_shares(&e, &to);
-        storage::set_vault_shares(&e, &to, to_shares + amount);
-
-        BlendVaultEvents::transfer(&e, &from, &to, amount);
+        shared_events::deposit(&e, &from, &receiver, assets, new_shares);
+        new_shares
     }
 
-    //********** Read-Write Admin Only ***********//
+    /// Burns **exactly** `shares` from `owner` and withdraws the corresponding
+    /// underlying to `receiver`.
+    ///
+    /// Never clamps to the owner's balance: the caller named an exact share
+    /// count, so an over-large request fails (OpenZeppelin `InsufficientBalance`)
+    /// rather than paying short.
+    ///
+    /// ### Returns
+    /// * `i128` - The amount of underlying tokens sent to the receiver
+    pub fn redeem(
+        e: Env,
+        shares: i128,
+        receiver: Address,
+        owner: Address,
+        operator: Address,
+    ) -> i128 {
+        require_positive(&e, shares);
+        operator.require_auth();
+        ttl::extend_instance_ttl(&e);
+        spend_operator_allowance(&e, &owner, &operator, shares);
+
+        let pool = storage::get_pool(&e);
+        let asset = storage::get_asset(&e);
+        let (withdraw_amount, _) = vault::redeem(&e, &pool, &asset, &owner, shares);
+        pool::withdraw(&e, &pool, &asset, &receiver, withdraw_amount);
+
+        shared_events::redeem(&e, &owner, &receiver, shares, withdraw_amount);
+        withdraw_amount
+    }
+
+    // ── operations ──────────────────────────────────────────────────────────
+
+    /// Moves a stray token out of the vault. See `vault_common::sweep` for what
+    /// it refuses; this only adds the admin gate. BLND never rests here:
+    /// `claim_emissions` swaps it in the same call.
+    pub fn sweep(e: Env, token: Address, to: Address, amount: i128) {
+        storage::get_admin(&e).require_auth();
+        ttl::extend_instance_ttl(&e);
+        sweep::sweep(&e, &storage::get_asset(&e), &token, &to, amount);
+    }
 
     /// Sets the admin address. Requires auth from both the current and new admin.
-    ///
-    /// ### Arguments
-    /// * `admin` - The new admin address
     pub fn set_admin(e: Env, admin: Address) {
-        storage::extend_instance(&e);
+        ttl::extend_instance_ttl(&e);
         storage::get_admin(&e).require_auth();
         admin.require_auth();
         storage::set_admin(&e, admin);
     }
 
-    /// Sets the deposit signer. Pass `None` to remove the signer requirement.
-    ///
-    /// ### Arguments
-    /// * `signer` - The new signer address, or `None` to disable
-    pub fn set_signer(e: Env, signer: Option<Address>) {
-        storage::extend_instance(&e);
-        storage::get_admin(&e).require_auth();
-        if let Some(signer_addr) = signer {
-            signer_addr.require_auth();
-            storage::set_signer(&e, signer_addr);
-        } else {
-            storage::del_signer(&e);
-        }
-    }
-
     /// Sets the Soroswap router address used for harvesting BLND emissions.
-    ///
-    /// ### Arguments
-    /// * `router` - The Soroswap router contract address
     pub fn set_router(e: Env, router: Address) {
-        storage::extend_instance(&e);
+        ttl::extend_instance_ttl(&e);
         storage::get_admin(&e).require_auth();
         storage::set_router(&e, router);
     }
 
     /// Claims accrued BLND emissions from the pool, swaps them for the underlying
     /// asset via Soroswap, and supplies the proceeds back into the pool. Every
-    /// depositor's share value increases automatically — no manual distribution needed.
+    /// depositor's share value increases automatically.
     ///
-    /// ### Arguments
-    /// * `amount_out_min` - Minimum underlying tokens to accept from the swap (slippage floor)
+    /// Unprivileged. `amount_out_min` is the caller's slippage floor on the
+    /// swap leg.
     ///
     /// ### Returns
     /// * `i128` - The amount of underlying tokens received and re-supplied
     pub fn claim_emissions(e: Env, amount_out_min: i128) -> i128 {
-        storage::extend_instance(&e);
+        ttl::extend_instance_ttl(&e);
         let pool = storage::get_pool(&e);
         let asset = storage::get_asset(&e);
         let blnd = storage::get_blnd_token(&e);
@@ -353,121 +251,39 @@ impl BlendVault {
             pool::vault_b_token_balance(&e, &pool, &asset, &e.current_contract_address());
         storage::set_vault_data(&e, &vault);
 
-        BlendVaultEvents::vault_emissions_claim(&e, &pool, blnd_claimed, underlying_received);
+        events::emissions_claim(&e, &pool, blnd_claimed, underlying_received);
         underlying_received
     }
 
-    //********** Read-Write ***********//
+    // ── views ───────────────────────────────────────────────────────────────
 
-    /// Deposits tokens into the blend vault. Requires the signer to sign if one is set.
-    ///
-    /// ### Arguments
-    /// * `assets` - The amount of underlying tokens to deposit
-    /// * `receiver` - The address that will receive the minted vault shares
-    /// * `from` - The address providing the underlying tokens
-    /// * `operator` - The address initiating the deposit
-    ///
-    /// ### Returns
-    /// * `i128` - The number of shares minted to the receiver
-    pub fn deposit(e: Env, assets: i128, receiver: Address, from: Address, operator: Address) -> i128 {
-        storage::extend_instance(&e);
-        operator.require_auth();
-        if let Some(signer) = storage::get_signer(&e) {
-            signer.require_auth();
+    /// `(pool, asset)`: the same shape every adapter exposes, so the YBC
+    /// indexer can record which protocol a vault lends into.
+    pub fn get_config(e: Env) -> (Address, Address) {
+        (storage::get_pool(&e), storage::get_asset(&e))
+    }
+
+    /// The vault's ratio state with an up-to-date `b_rate`.
+    pub fn get_vault(e: Env) -> VaultData {
+        let pool = storage::get_pool(&e);
+        let asset = storage::get_asset(&e);
+        vault::get_vault_updated(&e, &pool, &asset)
+    }
+
+    /// `user`'s position in bTokens.
+    pub fn get_b_tokens(e: Env, user: Address) -> i128 {
+        let shares = Base::balance(&e, &user);
+        if shares > 0 {
+            let pool = storage::get_pool(&e);
+            let asset = storage::get_asset(&e);
+            let vault = vault::get_vault_updated(&e, &pool, &asset);
+            vault.shares_to_b_tokens_down(&e, shares)
+        } else {
+            0
         }
-
-        require_positive(&e, assets, BlendVaultError::InvalidAmount);
-
-        let pool = storage::get_pool(&e);
-        let asset = storage::get_asset(&e);
-        pool::supply(&e, &pool, &asset, &from, assets);
-        let (b_tokens_minted, new_shares) = vault::deposit(&e, &pool, &asset, &receiver, assets);
-
-        BlendVaultEvents::vault_deposit(
-            &e,
-            &pool,
-            &asset,
-            &from,
-            assets,
-            new_shares,
-            b_tokens_minted,
-        );
-        new_shares
     }
 
-    /// Withdraws tokens from the blend vault. If the input amount exceeds the owner's
-    /// balance, the owner's full balance will be withdrawn.
-    ///
-    /// ### Arguments
-    /// * `assets` - The amount of underlying tokens to withdraw
-    /// * `receiver` - The address that will receive the withdrawn tokens
-    /// * `owner` - The address whose vault shares will be burned
-    /// * `operator` - The address initiating the withdrawal
-    ///
-    /// ### Returns
-    /// * `i128` - The number of shares burnt
-    pub fn withdraw(e: Env, assets: i128, receiver: Address, owner: Address, operator: Address) -> i128 {
-        storage::extend_instance(&e);
-        operator.require_auth();
-        require_positive(&e, assets, BlendVaultError::InvalidAmount);
-
-        let pool = storage::get_pool(&e);
-        let asset = storage::get_asset(&e);
-        let (withdraw_amount, b_tokens_burnt, burnt_shares) =
-            vault::withdraw(&e, &pool, &asset, &owner, assets);
-        // burnt_shares is only known once the clamp above has run, so the
-        // allowance is consumed here; a panic reverts the burn with it.
-        spend_operator_allowance(&e, &owner, &operator, burnt_shares);
-        pool::withdraw(&e, &pool, &asset, &receiver, withdraw_amount);
-
-        BlendVaultEvents::vault_withdraw(
-            &e,
-            &pool,
-            &asset,
-            &owner,
-            assets,
-            burnt_shares,
-            b_tokens_burnt,
-        );
-        burnt_shares
-    }
-
-    /// Redeems an exact number of vault shares for underlying tokens.
-    ///
-    /// Where `withdraw` is asset-denominated and clamps down to the owner's
-    /// balance, `redeem` burns exactly `shares` and fails if the owner holds
-    /// fewer. A caller that tracks its position in shares can therefore zero it
-    /// out exactly, instead of converting to assets first and stranding — or
-    /// over-burning — the unit or two that the round trip rounds away.
-    ///
-    /// ### Arguments
-    /// * `shares` - The exact number of vault shares to burn
-    /// * `receiver` - The address that will receive the withdrawn tokens
-    /// * `owner` - The address whose vault shares will be burned
-    /// * `operator` - The address initiating the redemption
-    ///
-    /// ### Returns
-    /// * `i128` - The amount of underlying tokens sent to the receiver
-    pub fn redeem(e: Env, shares: i128, receiver: Address, owner: Address, operator: Address) -> i128 {
-        storage::extend_instance(&e);
-        operator.require_auth();
-        require_positive(&e, shares, BlendVaultError::InvalidSharesBurnt);
-        spend_operator_allowance(&e, &owner, &operator, shares);
-
-        let pool = storage::get_pool(&e);
-        let asset = storage::get_asset(&e);
-        let (withdraw_amount, b_tokens_burnt) = vault::redeem(&e, &pool, &asset, &owner, shares);
-        pool::withdraw(&e, &pool, &asset, &receiver, withdraw_amount);
-
-        BlendVaultEvents::vault_withdraw(
-            &e,
-            &pool,
-            &asset,
-            &owner,
-            withdraw_amount,
-            shares,
-            b_tokens_burnt,
-        );
-        withdraw_amount
+    pub fn get_admin(e: Env) -> Address {
+        storage::get_admin(&e)
     }
 }

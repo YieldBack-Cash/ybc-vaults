@@ -1,20 +1,17 @@
-use blend_contract_sdk::pool::{Client as PoolClient, Request};
+//! The six calls the vault makes into its Blend pool.
+
+use crate::blend::pool::{Client as PoolClient, Request, Reserve};
 use soroban_sdk::{vec, Address, Env, Vec};
 
-/// Executes a supply of a specific reserve into the underlying pool on behalf of the blend vault
-///
-/// ### Arguments
-/// * `pool` - The pool address
-/// * `reserve` - The reserve address
-/// * `from` - The address of the user
-/// * `amount` - The amount of tokens to deposit
+/// Supplies `amount` of `reserve` into the pool on behalf of the vault. The
+/// tokens are pulled from `from`, who must have authorized the transfer.
 pub fn supply(e: &Env, pool: &Address, reserve: &Address, from: &Address, amount: i128) {
-    PoolClient::new(&e, &pool).submit(
+    PoolClient::new(e, pool).submit(
         &e.current_contract_address(),
-        &from,
-        &from,
+        from,
+        from,
         &vec![
-            &e,
+            e,
             Request {
                 address: reserve.clone(),
                 amount,
@@ -24,20 +21,14 @@ pub fn supply(e: &Env, pool: &Address, reserve: &Address, from: &Address, amount
     );
 }
 
-/// Executes a user withdrawal of a specific reserve from the underlying pool on behalf of the blend vault
-///
-/// ### Arguments
-/// * `pool` - The pool address
-/// * `reserve` - The reserve address
-/// * `to` - The destination of the withdrawal
-/// * `amount` - The amount of tokens to withdraw
+/// Withdraws `amount` of `reserve` from the vault's position to `to`.
 pub fn withdraw(e: &Env, pool: &Address, reserve: &Address, to: &Address, amount: i128) {
-    PoolClient::new(&e, &pool).submit(
+    PoolClient::new(e, pool).submit(
         &e.current_contract_address(),
         &e.current_contract_address(),
-        &to,
+        to,
         &vec![
-            &e,
+            e,
             Request {
                 address: reserve.clone(),
                 amount,
@@ -47,38 +38,35 @@ pub fn withdraw(e: &Env, pool: &Address, reserve: &Address, to: &Address, amount
     );
 }
 
-/// Executes a claim of BLND emissions from the pool on behalf of the blend vault
-///
-/// ### Arguments
-/// * `pool` - The pool address
-/// * `reserve_token_ids` - The reserve token IDs to claim emissions for
-/// * `to` - The address to send the emissions to
-///
-/// ### Returns
-/// * `i128` - The amount of emissions claimed
+/// Claims BLND emissions for `reserve_token_ids` to `to`. Returns the amount.
 pub fn claim(e: &Env, pool: &Address, reserve_token_ids: &Vec<u32>, to: &Address) -> i128 {
-    PoolClient::new(&e, &pool).claim(&e.current_contract_address(), reserve_token_ids, to)
+    PoolClient::new(e, pool).claim(&e.current_contract_address(), reserve_token_ids, to)
 }
 
-/// Fetches the reserve's b_rate from the pool
-///
-/// ### Arguments
-/// * `pool` - The pool address
-/// * `reserve` - The reserve address to fetch the b_rate for
-///
-/// ### Returns
-/// * `i128` - The b_rate of the reserve
-pub fn reserve_b_rate(e: &Env, pool: &Address, reserve: &Address) -> i128 {
-    PoolClient::new(&e, &pool).get_reserve(reserve).data.b_rate
+/// The reserve's full record: config (cap, enabled, index) and data (`b_rate`,
+/// `b_supply`).
+pub fn reserve(e: &Env, pool: &Address, asset: &Address) -> Reserve {
+    PoolClient::new(e, pool).get_reserve(asset)
 }
 
-/// Returns the emission token ID for the reserve's supply (bToken) position.
-/// Token ID = reserve_index * 2 + 1
+/// The reserve's `b_rate`, 12-decimal fixed point.
+pub fn reserve_b_rate(e: &Env, pool: &Address, asset: &Address) -> i128 {
+    reserve(e, pool, asset).data.b_rate
+}
+
+/// The pool's status word. Blend allows supplies while it is below 4; 4 and 5
+/// are frozen, 6 is setup.
+pub fn status(e: &Env, pool: &Address) -> u32 {
+    PoolClient::new(e, pool).get_config().status
+}
+
+/// The emission token id for the reserve's supply (bToken) side:
+/// `reserve_index * 2 + 1`.
 pub fn reserve_supply_token_id(e: &Env, pool: &Address, reserve: &Address) -> u32 {
     PoolClient::new(e, pool).get_reserve(reserve).config.index * 2 + 1
 }
 
-/// Returns the vault's actual bToken balance for a reserve by reading the pool's positions.
+/// The vault's actual bToken balance for a reserve, read from the pool.
 pub fn vault_b_token_balance(e: &Env, pool: &Address, reserve: &Address, vault: &Address) -> i128 {
     let reserve_index = PoolClient::new(e, pool).get_reserve(reserve).config.index;
     PoolClient::new(e, pool)

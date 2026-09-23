@@ -11,14 +11,10 @@ build:
 test:
 	cargo test --workspace
 
-# blend-vault is excluded from the workspace until it is ported to SDK 26.
-test-blend:
-	cd crates/blend-vault && cargo test
-
 fmt:
 	cargo fmt --all
 
 clean:
 	cargo clean
 
-.PHONY: default build test test-blend fmt clean
+.PHONY: default build test fmt clean
