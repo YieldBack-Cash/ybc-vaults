@@ -11,7 +11,7 @@ use crate::testutils::DEFAULT_SUPPLY_CAP;
 /// market*. A dust redeem whose asset value floors to zero would therefore
 /// hand the entire pooled position to whoever asked for one share.
 #[test]
-#[should_panic(expected = "Error(Contract, #21)")]
+#[should_panic(expected = "Error(Contract, #300)")]
 fn a_dust_redeem_flooring_to_zero_assets_is_refused() {
     let f = VaultFixture::new();
     f.vault.deposit(&1_000_0000000, &f.user, &f.user, &f.user);

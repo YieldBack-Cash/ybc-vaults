@@ -5,7 +5,7 @@
 //! # What this is
 //!
 //! XOXNO is a Soroban money market. It stores a supply position as a
-//! `scaled_amount` — a figure that does *not* change as interest accrues —
+//! `scaled_amount`, a figure that does *not* change as interest accrues,
 //! against a per-market `supply_index` in RAY. The real balance is
 //! `scaled_amount * supply_index / RAY`.
 //!
@@ -40,6 +40,14 @@
 //!   vault, so a consumer probing the rate at market creation succeeds.
 //! * **No rounding wedge.** Price moves only when XOXNO's index moves, so a
 //!   consumer that ratchets its rate engages only on real write-downs.
+//!
+//! # What is shared
+//!
+//! The share token, the operator-allowance rule, the positive-amount guard,
+//! `sweep`, the TTL policy, the `Deposit`/`Redeem`/`Sweep` events and the
+//! widening multiply all come from `vault_common`. This crate holds only what
+//! is XOXNO's: the controller client, the account sentinel, and the index
+//! maths.
 
 mod contract;
 mod controller;
@@ -56,5 +64,6 @@ mod tests;
 
 pub use crate::contract::{XoxnoVault, XoxnoVaultArgs, XoxnoVaultClient};
 pub use crate::controller::{ControllerClient, HubAssetKey, MarketIndexRaw, RAY};
-pub use crate::errors::VaultError;
+pub use crate::errors::XoxnoError;
 pub use crate::storage::Config;
+pub use vault_common::VaultError;

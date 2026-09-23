@@ -3,6 +3,7 @@ use soroban_sdk::{
     token::{StellarAssetClient, TokenClient},
     Address, Env, String,
 };
+use vault_testkit::ConformanceFixture;
 
 use crate::contract::{XoxnoVault, XoxnoVaultClient};
 use crate::controller::RAY;
@@ -81,7 +82,7 @@ impl<'a> VaultFixture<'a> {
     /// The matching cash is minted to the pool as well. Raising the index alone
     /// would create a claim with nothing behind it, and the first holder to
     /// redeem their gain would fail on the pool's balance rather than on
-    /// anything the vault did — a mock artefact masquerading as a vault bug.
+    /// anything the vault did: a mock artefact masquerading as a vault bug.
     /// Real accrual is funded by borrowers paying interest.
     pub fn accrue(&self, bps: i128) {
         let before = self.vault.total_assets();
@@ -96,7 +97,10 @@ impl<'a> VaultFixture<'a> {
 
     /// A `seize_positions`-style write-down: drop the index by `bps`.
     pub fn write_down(&self, bps: i128) {
-        let index = self.controller.get_market_index(&self.hub_asset()).supply_index;
+        let index = self
+            .controller
+            .get_market_index(&self.hub_asset())
+            .supply_index;
         self.controller
             .set_supply_index(&(index - index * bps / 10_000));
     }
@@ -109,10 +113,44 @@ impl<'a> VaultFixture<'a> {
     }
 
     pub fn index(&self) -> i128 {
-        self.controller.get_market_index(&self.hub_asset()).supply_index
+        self.controller
+            .get_market_index(&self.hub_asset())
+            .supply_index
     }
 
     pub fn assert_index_starts_at_ray(&self) {
         assert_eq!(self.index(), RAY);
+    }
+}
+
+/// What the shared conformance suite needs. See `tests/conformance.rs`.
+impl ConformanceFixture for VaultFixture<'_> {
+    fn env(&self) -> &Env {
+        &self.e
+    }
+
+    fn vault(&self) -> Address {
+        self.vault_address.clone()
+    }
+
+    fn asset(&self) -> Address {
+        self.asset.clone()
+    }
+
+    fn admin(&self) -> Address {
+        self.admin.clone()
+    }
+
+    fn mint(&self, to: &Address, amount: i128) {
+        self.mint_to(to, amount);
+    }
+
+    fn accrue(&self, bps: i128) {
+        VaultFixture::accrue(self, bps);
+    }
+
+    fn write_down(&self, bps: i128) -> bool {
+        VaultFixture::write_down(self, bps);
+        true
     }
 }

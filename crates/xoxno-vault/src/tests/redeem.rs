@@ -76,7 +76,11 @@ fn operator_may_redeem_against_a_share_allowance() {
     f.vault.redeem(&300_0000000, &f.other, &f.user, &f.other);
 
     assert_eq!(f.vault.balance(&f.user), 700_0000000);
-    assert_eq!(f.vault.allowance(&f.user, &f.other), 0, "allowance consumed");
+    assert_eq!(
+        f.vault.allowance(&f.user, &f.other),
+        0,
+        "allowance consumed"
+    );
 }
 
 #[test]
@@ -110,7 +114,7 @@ fn zero_redeem_is_refused() {
 }
 
 #[test]
-#[should_panic(expected = "Error(Contract, #32)")]
+#[should_panic(expected = "Error(Contract, #301)")]
 fn redeem_before_any_deposit_has_no_account() {
     let f = VaultFixture::new();
     f.vault.redeem(&1, &f.user, &f.user, &f.user);

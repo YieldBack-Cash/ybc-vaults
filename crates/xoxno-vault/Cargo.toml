@@ -1,6 +1,6 @@
 [package]
 name = "xoxno-vault"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "SEP-56 tokenized vault over a XOXNO lending position, for YBC PT/YT markets"
 
@@ -12,30 +12,11 @@ doctest = false
 testutils = ["soroban-sdk/testutils"]
 
 [dependencies]
-# Must match ybc-contracts. A mismatched SDK makes Env/Address incompatible
-# across the call boundary — the same conflict that keeps tests/blend out of
-# that workspace.
-# NOTE: soroban-fixed-point-math is deliberately absent. Its 1.5.0 release pins
-# soroban-sdk 25.3.2, so its `Env` is a distinct type from ours and every
-# env-taking helper fails to typecheck. The widening multiply lives in
-# `vault::mul_div_floor` on the SDK's own U256 instead.
-soroban-sdk = "26.1.1"
-stellar-tokens = "0.7.2"
+soroban-sdk = { workspace = true }
+stellar-tokens = { workspace = true }
+vault-common = { workspace = true }
 
 [dev-dependencies]
-soroban-sdk = { version = "26.1.1", features = ["testutils"] }
-proptest = "1"
-
-[profile.release]
-opt-level = "z"
-overflow-checks = true
-debug = 0
-strip = "symbols"
-debug-assertions = false
-panic = "abort"
-codegen-units = 1
-lto = true
-
-[profile.release-with-logs]
-inherits = "release"
-debug-assertions = true
+soroban-sdk = { workspace = true, features = ["testutils"] }
+vault-testkit = { workspace = true }
+proptest = { workspace = true }

@@ -76,12 +76,12 @@ total vault size.
 
 ## Build and test
 
-```bash
-make test
-```
+This crate is a member of the `ybc-vaults` workspace; build and test from the
+workspace root:
 
 ```bash
-make build
+make test    # cargo test --workspace: this crate's tests plus the shared conformance suite
+make build   # stellar contract build --optimize
 ```
 
 `stellar contract build` is required rather than `cargo build --target
@@ -89,14 +89,28 @@ wasm32v1-none` — soroban-sdk 26's `experimental_spec_shaking_v2` feature needs
 the CLI wrapper (v25.2.0+), and a bare cargo build fails in the SDK's build
 script.
 
+## What is shared and what is XOXNO's
+
+The share token (OpenZeppelin `Base`), the operator-allowance rule on `redeem`,
+the positive-amount guard, `sweep`, the TTL policy, the `Deposit`/`Redeem`/
+`Sweep` events and the widening multiply come from `vault-common`. The
+`tests/conformance.rs` file binds this crate's fixture to `vault-testkit`, which
+runs the same 22 properties against every adapter.
+
+This crate owns only what is XOXNO's: the hand-written controller client
+(`controller.rs`), the account-id sentinel, the index maths (`vault.rs`), the
+`max_*`/`total_assets` views, and the two XOXNO-specific errors
+(`ZeroAssetRedeem = 300`, `NoAccount = 301`; shared codes are 10–49,
+OpenZeppelin's are 100–199).
+
 ## Notes for anyone extending this
 
 **`soroban-fixed-point-math` is deliberately absent.** Its 1.5.0 release pins
 soroban-sdk 25.3.2, so its `Env` is a distinct type from ours and every
 env-taking helper fails to typecheck. The widening multiply lives in
-`vault::mul_div_floor` on the SDK's own `U256`. The widening is not optional: at
-the 5M supply cap `shares × index` is around 5e40 against an `i128` ceiling near
-1.7e38.
+`vault_common::math::mul_div_floor` on the SDK's own `U256`. The widening is not
+optional: at the 5M supply cap `shares × index` is around 5e40 against an
+`i128` ceiling near 1.7e38.
 
 **The zero sentinel.** XOXNO reads a withdrawal amount of `0` as *withdraw
 everything from this market*. A dust redeem flooring to zero assets would hand

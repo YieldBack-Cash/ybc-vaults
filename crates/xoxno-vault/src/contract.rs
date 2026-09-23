@@ -2,18 +2,22 @@ use soroban_sdk::{
     auth::{ContractContext, InvokerContractAuthEntry, SubContractInvocation},
     contract, contractimpl, panic_with_error,
     token::TokenClient,
-    vec, Address, Env, IntoVal, MuxedAddress, String, Symbol,
+    vec, Address, Env, IntoVal, String, Symbol,
 };
-use stellar_tokens::fungible::{Base, FungibleToken};
+use stellar_tokens::fungible::Base;
+use vault_common::{auth::spend_operator_allowance, events, guard::require_positive, sweep, ttl};
 
 use crate::controller::{ControllerClient, HubAssetKey};
-use crate::errors::VaultError;
-use crate::events;
+use crate::errors::XoxnoError;
+use crate::events::account_opened;
 use crate::storage::{self, Config};
 use crate::vault::shares_to_assets;
 
 #[contract]
 pub struct XoxnoVault;
+
+// SEP-41 on the same address as the SEP-56 surface, delegated to OpenZeppelin.
+vault_common::impl_share_token!(XoxnoVault);
 
 fn hub_asset(cfg: &Config) -> HubAssetKey {
     HubAssetKey {
@@ -38,7 +42,7 @@ fn scaled_position(controller: &ControllerClient, account_id: u64, key: &HubAsse
 #[contractimpl]
 impl XoxnoVault {
     /// `hub_id` and `spoke_id` are parameters rather than constants because an
-    /// account's spoke binding is permanent — baking the choice into the WASM
+    /// account's spoke binding is permanent: baking the choice into the WASM
     /// would make it unrecoverable without a new binary.
     ///
     /// The `get_market_index` call is a probe: it reverts if that market is not
@@ -55,7 +59,7 @@ impl XoxnoVault {
         symbol: String,
     ) {
         if storage::has_config(&e) {
-            panic_with_error!(&e, VaultError::AlreadyInitialized);
+            panic_with_error!(&e, vault_common::VaultError::AlreadyInitialized);
         }
 
         let client = ControllerClient::new(&e, &controller);
@@ -82,7 +86,7 @@ impl XoxnoVault {
         // 1e7 fixed-point scale consumers assume; there is no virtual offset to
         // account for, because this vault needs no inflation cushion.
         Base::set_metadata(&e, 7, name, symbol);
-        storage::extend_instance_ttl(&e);
+        ttl::extend_instance_ttl(&e);
     }
 
     // ── SEP-56 ──────────────────────────────────────────────────────────────
@@ -96,7 +100,7 @@ impl XoxnoVault {
     /// One cross-contract call, and no read of the vault's own supply or
     /// position. That is the whole point of mirroring XOXNO's scaled unit: the
     /// price is the market's index, so it cannot be moved by anything that
-    /// happens to this contract's balances — including a donation.
+    /// happens to this contract's balances, including a donation.
     ///
     /// It is also positive on an empty vault, so a consumer probing the rate at
     /// market creation does not need a bootstrap deposit first.
@@ -123,8 +127,8 @@ impl XoxnoVault {
     /// Remaining room under the spoke's supply cap, in assets.
     ///
     /// The cap is market-wide for the spoke, not per-vault, so this reports the
-    /// shared headroom — the honest figure, since another depositor consuming it
-    /// first is exactly what would make a deposit revert. Returns 0 when the
+    /// shared headroom, which is the honest figure: another depositor consuming
+    /// it first is exactly what would make a deposit revert. Returns 0 when the
     /// market is paused or frozen.
     ///
     /// Not on any hot path: two extra cross-contract reads are fine for a view
@@ -143,7 +147,9 @@ impl XoxnoVault {
         let index = controller.get_market_index(&key).supply_index;
         let supplied = shares_to_assets(
             e,
-            controller.get_spoke_usage(&cfg.spoke_id, &key).supplied_scaled_ray,
+            controller
+                .get_spoke_usage(&cfg.spoke_id, &key)
+                .supplied_scaled_ray,
             index,
         );
 
@@ -156,7 +162,7 @@ impl XoxnoVault {
 
     /// What `owner` could redeem right now, in assets.
     ///
-    /// Not consulted by YBC, which calls only the four core functions — but a
+    /// Not consulted by YBC, which calls only the four core functions. But a
     /// caller sizing a withdrawal has no other honest source for this, and
     /// discovering the limit through a revert is worse.
     pub fn max_withdraw(e: &Env, owner: Address) -> i128 {
@@ -177,11 +183,9 @@ impl XoxnoVault {
         from: Address,
         operator: Address,
     ) -> i128 {
-        if assets <= 0 {
-            panic_with_error!(e, VaultError::AmountNotPositive);
-        }
+        require_positive(e, assets);
         operator.require_auth();
-        storage::extend_instance_ttl(e);
+        ttl::extend_instance_ttl(e);
 
         let cfg = storage::get_config(e);
         let key = hub_asset(&cfg);
@@ -204,9 +208,7 @@ impl XoxnoVault {
             token.transfer_from(&operator, &from, &vault, &assets);
         }
         let received = token.balance(&vault) - balance_before;
-        if received <= 0 {
-            panic_with_error!(e, VaultError::AmountNotPositive);
-        }
+        require_positive(e, received);
 
         // XOXNO's pool pulls the tokens out of this contract during `supply`,
         // so that exact transfer has to be pre-authorized. The argument values
@@ -233,13 +235,11 @@ impl XoxnoVault {
         );
         if account_id == 0 {
             storage::set_account_id(e, new_id);
-            events::account_opened(e, new_id, cfg.spoke_id);
+            account_opened(e, new_id, cfg.spoke_id);
         }
 
         let minted = scaled_position(&controller, new_id, &key) - before;
-        if minted <= 0 {
-            panic_with_error!(e, VaultError::AmountNotPositive);
-        }
+        require_positive(e, minted);
 
         Base::mint(e, &receiver, minted);
         events::deposit(e, &from, &receiver, received, minted);
@@ -259,11 +259,9 @@ impl XoxnoVault {
         owner: Address,
         operator: Address,
     ) -> i128 {
-        if shares <= 0 {
-            panic_with_error!(e, VaultError::AmountNotPositive);
-        }
+        require_positive(e, shares);
         operator.require_auth();
-        storage::extend_instance_ttl(e);
+        ttl::extend_instance_ttl(e);
 
         let cfg = storage::get_config(e);
         let key = hub_asset(&cfg);
@@ -272,7 +270,7 @@ impl XoxnoVault {
 
         let account_id = storage::get_account_id(e);
         if account_id == 0 {
-            panic_with_error!(e, VaultError::NoAccount);
+            panic_with_error!(e, XoxnoError::NoAccount);
         }
 
         let index = controller.get_market_index(&key).supply_index;
@@ -282,15 +280,11 @@ impl XoxnoVault {
         // amount of zero as "withdraw everything from this market", so passing
         // it through would empty the entire pooled position. Refuse instead.
         if assets <= 0 {
-            panic_with_error!(e, VaultError::ZeroAssetRedeem);
+            panic_with_error!(e, XoxnoError::ZeroAssetRedeem);
         }
 
-        // Delegated exit: the operator spends a share allowance. Skipped when
-        // owner and operator are the same address — a second `require_auth` on
-        // an address already authorized in this frame is a host error.
-        if operator != owner {
-            Base::spend_allowance(e, &owner, &operator, shares);
-        }
+        // Delegated exit: the operator spends a share allowance.
+        spend_operator_allowance(e, &owner, &operator, shares);
 
         Base::update(e, Some(&owner), None, shares);
 
@@ -307,29 +301,13 @@ impl XoxnoVault {
 
     // ── operations ──────────────────────────────────────────────────────────
 
-    /// Moves a stray token out of the vault.
-    ///
-    /// Exists because incentive programs distribute to whichever address held
-    /// the position — this vault — and without a route out, anything that lands
-    /// here is stranded permanently.
-    ///
-    /// The underlying asset and the vault's own share token are hard-refused.
-    /// Depositor funds are never reachable through this, which is the only
-    /// reason an admin-held sweep is acceptable at all.
+    /// Moves a stray token out of the vault. See `vault_common::sweep` for what
+    /// it refuses; this only adds the admin gate.
     pub fn sweep(e: &Env, token: Address, to: Address, amount: i128) {
         let cfg = storage::get_config(e);
         cfg.admin.require_auth();
-        storage::extend_instance_ttl(e);
-
-        if token == cfg.asset || token == e.current_contract_address() {
-            panic_with_error!(e, VaultError::SweepForbidden);
-        }
-        if amount <= 0 {
-            panic_with_error!(e, VaultError::AmountNotPositive);
-        }
-
-        TokenClient::new(e, &token).transfer(&e.current_contract_address(), &to, &amount);
-        events::sweep(e, &token, &to, amount);
+        ttl::extend_instance_ttl(e);
+        sweep::sweep(e, &cfg.asset, &token, &to, amount);
     }
 
     // ── views ───────────────────────────────────────────────────────────────
@@ -342,50 +320,12 @@ impl XoxnoVault {
     pub fn config(e: &Env) -> Config {
         storage::get_config(e)
     }
-}
 
-/// SEP-41. Required on the same address as the SEP-56 surface: consumers
-/// custody these shares and hold them as an AMM reserve.
-#[contractimpl]
-impl FungibleToken for XoxnoVault {
-    /// `Base`, not `Vault`. OpenZeppelin's `Vault` derives `total_assets` from
-    /// the contract's own token balance, which is always zero here — the assets
-    /// live in the lending position — and it exposes no hook to override that.
-    type ContractType = Base;
-
-    fn total_supply(e: &Env) -> i128 {
-        Base::total_supply(e)
-    }
-
-    fn balance(e: &Env, account: Address) -> i128 {
-        Base::balance(e, &account)
-    }
-
-    fn allowance(e: &Env, owner: Address, spender: Address) -> i128 {
-        Base::allowance(e, &owner, &spender)
-    }
-
-    fn transfer(e: &Env, from: Address, to: MuxedAddress, amount: i128) {
-        Base::transfer(e, &from, &to, amount)
-    }
-
-    fn transfer_from(e: &Env, spender: Address, from: Address, to: Address, amount: i128) {
-        Base::transfer_from(e, &spender, &from, &to, amount)
-    }
-
-    fn approve(e: &Env, owner: Address, spender: Address, amount: i128, live_until_ledger: u32) {
-        Base::approve(e, &owner, &spender, amount, live_until_ledger)
-    }
-
-    fn decimals(e: &Env) -> u32 {
-        Base::decimals(e)
-    }
-
-    fn name(e: &Env) -> String {
-        Base::name(e)
-    }
-
-    fn symbol(e: &Env) -> String {
-        Base::symbol(e)
+    /// `(protocol, asset)`: the same shape every adapter exposes, so the YBC
+    /// indexer can record which protocol a vault lends into without knowing
+    /// the adapter. For XOXNO the protocol address is the controller.
+    pub fn get_config(e: &Env) -> (Address, Address) {
+        let cfg = storage::get_config(e);
+        (cfg.controller, cfg.asset)
     }
 }

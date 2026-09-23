@@ -17,7 +17,9 @@
 //! `set_supply_index` accepts a *lower* value than the current one, so the
 //! `seize_positions` bad-debt write-down can be simulated.
 
-use soroban_sdk::{contract, contractimpl, contracttype, token::TokenClient, Address, Env, Map, Vec};
+use soroban_sdk::{
+    contract, contractimpl, contracttype, token::TokenClient, Address, Env, Map, Vec,
+};
 
 use crate::controller::{
     AccountPositionRaw, DebtPositionRaw, HubAssetKey, MarketIndexRaw, SpokeAssetConfig,
@@ -77,11 +79,7 @@ impl MockController {
     /// supplying into someone else's position.
     pub fn donate(e: Env, from: Address, account_id: u64, amount: i128) {
         let key = Self::hub_asset(e.clone());
-        TokenClient::new(&e, &key.asset).transfer(
-            &from,
-            &e.current_contract_address(),
-            &amount,
-        );
+        TokenClient::new(&e, &key.asset).transfer(&from, &e.current_contract_address(), &amount);
         let index = Self::index(e.clone());
         let delta = assets_to_shares(&e, amount, index);
         let scaled = Self::scaled(e.clone(), account_id) + delta;
@@ -111,11 +109,7 @@ impl MockController {
         let index = Self::index(e.clone());
 
         // The vault pre-authorized exactly this transfer before calling.
-        TokenClient::new(&e, &key.asset).transfer(
-            &caller,
-            &e.current_contract_address(),
-            &amount,
-        );
+        TokenClient::new(&e, &key.asset).transfer(&caller, &e.current_contract_address(), &amount);
 
         let id = if account_id == 0 {
             let next: u64 = e.storage().instance().get(&MockKey::NextId).unwrap_or(1);
@@ -232,7 +226,11 @@ impl MockController {
             liquidation_threshold: 8000,
             loan_to_value: 7600,
             no_seize: false,
-            paused: e.storage().instance().get(&MockKey::Paused).unwrap_or(false),
+            paused: e
+                .storage()
+                .instance()
+                .get(&MockKey::Paused)
+                .unwrap_or(false),
             supply_cap: e
                 .storage()
                 .instance()

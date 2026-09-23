@@ -1,10 +1,5 @@
 use soroban_sdk::{contracttype, panic_with_error, Address, Env};
-
-use crate::errors::VaultError;
-
-pub const DAY_IN_LEDGERS: u32 = 17280;
-pub const INSTANCE_BUMP_AMOUNT: u32 = 30 * DAY_IN_LEDGERS;
-pub const INSTANCE_LIFETIME_THRESHOLD: u32 = INSTANCE_BUMP_AMOUNT - DAY_IN_LEDGERS;
+use vault_common::VaultError;
 
 /// Set once at construction and never mutated.
 ///
@@ -30,12 +25,6 @@ pub struct Config {
 pub enum DataKey {
     Config,
     AccountId,
-}
-
-pub fn extend_instance_ttl(e: &Env) {
-    e.storage()
-        .instance()
-        .extend_ttl(INSTANCE_LIFETIME_THRESHOLD, INSTANCE_BUMP_AMOUNT);
 }
 
 pub fn has_config(e: &Env) -> bool {

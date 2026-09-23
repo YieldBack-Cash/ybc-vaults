@@ -1,0 +1,16 @@
+[package]
+name = "vault-common"
+version = "0.1.0"
+edition = "2021"
+description = "Protocol-independent layer shared by every YBC SEP-56 vault adapter"
+
+[lib]
+crate-type = ["rlib"]
+doctest = false
+
+[dependencies]
+soroban-sdk = { workspace = true }
+stellar-tokens = { workspace = true }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }

@@ -6,3 +6,6 @@
 .stellar/
 *.wasm
 !wasm/**/*.wasm
+# Soroban test snapshots are regenerated on every run; blend-vault's tracked
+# ones predate this rule and are cleaned up in its port.
+**/test_snapshots/

@@ -1,0 +1,13 @@
+[package]
+name = "vault-testkit"
+version = "0.1.0"
+edition = "2021"
+description = "Conformance suite every YBC vault adapter must pass"
+
+[lib]
+crate-type = ["rlib"]
+doctest = false
+
+[dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }
+vault-common = { workspace = true }

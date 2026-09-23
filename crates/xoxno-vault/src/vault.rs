@@ -13,39 +13,15 @@
 //! XOXNO burns `ceil(assets * RAY / index)` scaled units to protect itself, so
 //! the position drops by at most what the vault burned. Never more. That is why
 //! the crate invariant is `total_supply <= scaled_position` and not equality.
+//!
+//! The widening multiply itself is `vault_common::math::mul_div_floor`: at the
+//! 5,000,000 USDC supply cap on spoke 1, `shares * index` is around 5e40 and an
+//! `i128` tops out near 1.7e38.
 
-use soroban_sdk::{Env, U256};
+use soroban_sdk::Env;
+use vault_common::math::mul_div_floor;
 
 use crate::controller::RAY;
-
-/// `floor(x * y / denominator)`, carrying the intermediate in 256 bits.
-///
-/// The widening is not optional. At the 5,000,000 USDC supply cap on spoke 1
-/// (7 decimals) `shares * index` is around 5e40, and an `i128` tops out near
-/// 1.7e38 — a plain `checked_mul` would panic on a perfectly ordinary balance.
-///
-/// All three arguments are non-negative in every call site: share counts and
-/// asset amounts are guarded positive at the entry points, and both `RAY` and a
-/// market's `supply_index` are positive by construction.
-fn mul_div_floor(e: &Env, x: i128, y: i128, denominator: i128) -> i128 {
-    assert!(x >= 0 && y >= 0, "mul_div_floor: negative operand");
-    assert!(denominator > 0, "mul_div_floor: non-positive denominator");
-    if x == 0 || y == 0 {
-        return 0;
-    }
-
-    let numerator = U256::from_u128(e, x as u128).mul(&U256::from_u128(e, y as u128));
-    let quotient = numerator.div(&U256::from_u128(e, denominator as u128));
-
-    let quotient = quotient
-        .to_u128()
-        .expect("mul_div_floor: quotient exceeds u128");
-    assert!(
-        quotient <= i128::MAX as u128,
-        "mul_div_floor: quotient exceeds i128"
-    );
-    quotient as i128
-}
 
 /// `assets = floor(shares * index / RAY)`.
 pub fn shares_to_assets(e: &Env, shares: i128, index: i128) -> i128 {
@@ -54,10 +30,11 @@ pub fn shares_to_assets(e: &Env, shares: i128, index: i128) -> i128 {
 
 /// `shares = floor(assets * RAY / index)`.
 ///
-/// Previews and `max_*` only. The deposit path never computes a share count this
-/// way — it measures the scaled delta XOXNO actually credited, because XOXNO's
-/// own rounding decides that figure and a guess which floors differently would
-/// break the invariant cumulatively rather than once.
+/// Previews and the mock controller only. The deposit path never computes a
+/// share count this way: it measures the scaled delta XOXNO actually credited,
+/// because XOXNO's own rounding decides that figure and a guess which floors
+/// differently would break the invariant cumulatively rather than once.
+#[allow(dead_code)]
 pub fn assets_to_shares(e: &Env, assets: i128, index: i128) -> i128 {
     mul_div_floor(e, assets, RAY, index)
 }

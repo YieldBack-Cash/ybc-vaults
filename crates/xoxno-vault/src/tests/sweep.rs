@@ -25,7 +25,10 @@ fn sweeps_a_stray_token() {
 
     f.vault.sweep(&airdrop, &f.admin, &500_0000000);
 
-    assert_eq!(TokenClient::new(&f.e, &airdrop).balance(&f.admin), 500_0000000);
+    assert_eq!(
+        TokenClient::new(&f.e, &airdrop).balance(&f.admin),
+        500_0000000
+    );
     assert_eq!(
         TokenClient::new(&f.e, &airdrop).balance(&f.vault_address),
         0
