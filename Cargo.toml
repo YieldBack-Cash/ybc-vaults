@@ -1,0 +1,35 @@
+[workspace]
+resolver = "2"
+members = [
+  "crates/vault-common",
+  "crates/vault-testkit",
+  "crates/xoxno-vault",
+]
+# blend-vault is still on soroban-sdk 22 and cannot share an rlib with the
+# SDK-26 crates above. It builds standalone from its own directory until it is
+# ported onto vault-common (see ybc-contracts/docs/VAULT_MONOREPO_PLAN.md §3.1).
+exclude = ["crates/blend-vault"]
+
+[workspace.dependencies]
+# Must match ybc-contracts: a mismatched SDK makes Env/Address incompatible
+# across the call boundary in any test that links both. 26.1 is the newest
+# SDK the OpenZeppelin 0.7.2 crates support.
+soroban-sdk = "26.1.1"
+stellar-tokens = "0.7.2"
+proptest = "1"
+vault-common = { path = "crates/vault-common" }
+vault-testkit = { path = "crates/vault-testkit" }
+
+[profile.release]
+opt-level = "z"
+overflow-checks = true
+debug = 0
+strip = "symbols"
+debug-assertions = false
+panic = "abort"
+codegen-units = 1
+lto = true
+
+[profile.release-with-logs]
+inherits = "release"
+debug-assertions = true
