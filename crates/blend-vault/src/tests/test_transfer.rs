@@ -193,3 +193,46 @@ fn test_chain_of_transfers_final_holder_can_withdraw() {
     assert_eq!(f.blend_vault_client.get_shares(&merry), 0);
     assert!(usdc_client.balance(&merry) > 100_0000000);
 }
+
+/// A transfer to oneself is a no-op. `transfer` used to read the recipient's
+/// balance before writing the sender's debit, so when both were the same key
+/// the credit overwrote the debit and the holder ended with balance + amount —
+/// shares minted from nothing, redeemable against every other depositor.
+#[test]
+fn test_self_transfer_leaves_balance_unchanged() {
+    let e = Env::default();
+    e.cost_estimate().budget().reset_unlimited();
+    e.mock_all_auths();
+    e.set_default_info();
+
+    let f = setup(&e, 100_0000000);
+    let before = f.blend_vault_client.get_shares(&f.frodo);
+    let total_before = f.blend_vault_client.get_vault().total_shares;
+
+    f.blend_vault_client.transfer(&f.frodo, &f.frodo, &before);
+
+    assert_eq!(f.blend_vault_client.get_shares(&f.frodo), before);
+    assert_eq!(f.blend_vault_client.get_vault().total_shares, total_before);
+}
+
+/// Same property through the allowance path.
+#[test]
+fn test_self_transfer_from_leaves_balance_unchanged() {
+    let e = Env::default();
+    e.cost_estimate().budget().reset_unlimited();
+    e.mock_all_auths();
+    e.set_default_info();
+
+    let f = setup(&e, 100_0000000);
+    let before = f.blend_vault_client.get_shares(&f.frodo);
+    let total_before = f.blend_vault_client.get_vault().total_shares;
+    f.blend_vault_client
+        .approve(&f.frodo, &f.samwise, &before, &(e.ledger().sequence() + 100));
+
+    f.blend_vault_client
+        .transfer_from(&f.samwise, &f.frodo, &f.frodo, &before);
+
+    assert_eq!(f.blend_vault_client.get_shares(&f.frodo), before);
+    assert_eq!(f.blend_vault_client.get_vault().total_shares, total_before);
+    assert_eq!(f.blend_vault_client.allowance(&f.frodo, &f.samwise), 0);
+}

@@ -222,9 +222,12 @@ impl BlendVault {
         if from_shares < amount {
             panic_with_error!(&e, BlendVaultError::BalanceError);
         }
-        let to_shares = storage::get_vault_shares(&e, &to);
 
+        // Debit first, then read the credit side. When `from == to` both are
+        // the same key, so reading `to_shares` up front would let the credit
+        // overwrite the debit and mint `amount` shares out of nothing.
         storage::set_vault_shares(&e, &from, from_shares - amount);
+        let to_shares = storage::get_vault_shares(&e, &to);
         storage::set_vault_shares(&e, &to, to_shares + amount);
 
         BlendVaultEvents::transfer(&e, &from, &to, amount);
@@ -250,11 +253,13 @@ impl BlendVault {
         if from_shares < amount {
             panic_with_error!(&e, BlendVaultError::BalanceError);
         }
-        let to_shares = storage::get_vault_shares(&e, &to);
 
         storage::set_allowance(&e, &from, &spender, allowance - amount, expiration);
 
+        // Debit before reading the credit side — see `transfer` for why a
+        // self-transfer would otherwise mint shares.
         storage::set_vault_shares(&e, &from, from_shares - amount);
+        let to_shares = storage::get_vault_shares(&e, &to);
         storage::set_vault_shares(&e, &to, to_shares + amount);
 
         BlendVaultEvents::transfer(&e, &from, &to, amount);
