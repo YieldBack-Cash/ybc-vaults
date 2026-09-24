@@ -9,8 +9,11 @@ XOXNO stores a supply position as a `scaled_amount` — a figure that does **not
 change as interest accrues — against a per-market `supply_index` in RAY. Your
 real balance is `scaled_amount × supply_index / RAY`. That is already the
 tokenized-vault share primitive: a fixed claim on a growing pool. So this vault
-does not invent a second one. **Shares are 1:1 with XOXNO scaled units, and the
-exchange rate is the market's supply index.**
+does not invent a second one. **Shares are XOXNO's scaled units at asset
+precision, and the exchange rate is the market's supply index.** XOXNO stores
+`scaled_amount` as a 27-decimal Ray (`from_asset(amount) / index`), so for a
+7-decimal asset one share is `10^20` of those raw units (`vault::SCALED_UNIT`).
+The constructor refuses an asset whose `decimals()` is not 7.
 
 This is the same choice Pendle makes wrapping Aave: `PendleAaveV3SY` mirrors
 Aave's scaled balance against the liquidity index rather than running its own
@@ -19,7 +22,7 @@ share ratio.
 ## The invariant
 
 ```
-total_supply  <=  the vault's XOXNO scaled position
+total_supply × SCALED_UNIT  <=  the vault's XOXNO scaled position (Ray)
 ```
 
 Deposits mint exactly the scaled delta XOXNO credited, so the two track exactly.

@@ -23,6 +23,26 @@ use vault_common::math::mul_div_floor;
 
 use crate::controller::RAY;
 
+/// The only asset precision this vault supports. Share metadata is 7 decimals
+/// and every YBC consumer assumes the 1e7 scale, so the constructor refuses an
+/// asset with any other `decimals()`.
+pub const ASSET_DECIMALS: u32 = 7;
+
+/// XOXNO keeps every scaled amount as a `Ray`: the asset amount rescaled to 27
+/// decimals, divided by the index. One vault share is one scaled unit **at
+/// asset precision**, so the raw figure the controller reports is divided by
+/// `10^(27 - 7)` on the way in and multiplied back on the way out.
+///
+/// Verified on the testnet controller (2026-09-24): a 10 XLM supply credits a
+/// `scaled_amount` of ~1e28, not ~1e8. Treating that as the share count
+/// would have minted 1e20 PT per stroop.
+pub const SCALED_UNIT: i128 = 100_000_000_000_000_000_000; // 10^20
+
+/// A raw Ray-scaled controller figure, at asset precision (floored).
+pub fn ray_scaled_to_shares(raw: i128) -> i128 {
+    raw / SCALED_UNIT
+}
+
 /// `assets = floor(shares * index / RAY)`.
 pub fn shares_to_assets(e: &Env, shares: i128, index: i128) -> i128 {
     mul_div_floor(e, shares, index, RAY)
@@ -42,6 +62,18 @@ pub fn assets_to_shares(e: &Env, assets: i128, index: i128) -> i128 {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn scaled_unit_is_ray_over_asset_precision() {
+        assert_eq!(SCALED_UNIT, 10i128.pow(27 - ASSET_DECIMALS));
+        // 10 XLM at index RAY, as the controller reports it, is 10 XLM of shares.
+        assert_eq!(
+            ray_scaled_to_shares(1_000_0000000 * SCALED_UNIT),
+            1_000_0000000
+        );
+        // Sub-unit dust floors away; it stays in the position, never in shares.
+        assert_eq!(ray_scaled_to_shares(SCALED_UNIT - 1), 0);
+    }
 
     #[test]
     fn identity_at_ray() {

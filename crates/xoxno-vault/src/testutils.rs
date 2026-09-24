@@ -4,13 +4,19 @@
 //! drive the vault, with the market state settable directly so tests can force
 //! conditions the real protocol only produces occasionally.
 //!
-//! Two behaviours are reproduced deliberately, because the vault's correctness
-//! arguments depend on them:
+//! Three behaviours are reproduced deliberately, because the vault's
+//! correctness arguments depend on them:
 //!
-//! * **Asymmetric rounding.** A supply credits `floor(amount * RAY / index)`
-//!   scaled units; a withdrawal burns `ceil(amount * RAY / index)`. That is what
-//!   makes the redeem-side dust land in the vault's favour, and a mock that
-//!   floored both ways would let a broken vault pass.
+//! * **Ray-scaled positions.** The controller stores every scaled amount as a
+//!   27-decimal `Ray`: `from_asset(amount) / index`, where `from_asset`
+//!   rescales the 7-decimal amount to 27 decimals. A 10 XLM supply at index
+//!   RAY is a `scaled_amount` of 1e28, not 1e8. The first version of this mock
+//!   stored asset-precision units, and the vault inherited the mistake all the
+//!   way to a testnet simulation that minted 1e20 PT per stroop.
+//! * **Asymmetric rounding.** A supply credits `floor(...)` scaled units; a
+//!   withdrawal burns `ceil(...)`. That is what makes the redeem-side dust land
+//!   in the vault's favour, and a mock that floored both ways would let a
+//!   broken vault pass.
 //! * **The zero sentinel.** A withdrawal amount of `0` means *take everything*.
 //!   Without this the guard in `redeem` would be untestable.
 //!
@@ -20,15 +26,38 @@
 use soroban_sdk::{
     contract, contractimpl, contracttype, token::TokenClient, Address, Env, Map, Vec,
 };
+use vault_common::math::mul_div_floor;
 
 use crate::controller::{
     AccountPositionRaw, DebtPositionRaw, HubAssetKey, MarketIndexRaw, SpokeAssetConfig,
     SpokeUsageRaw, RAY,
 };
-use crate::vault::{assets_to_shares, shares_to_assets};
+use crate::vault::SCALED_UNIT;
 
 /// Spoke 1's live mainnet supply cap for hub 1 USDC: 5,000,000 at 7 decimals.
 pub const DEFAULT_SUPPLY_CAP: i128 = 50_000_000_000_000;
+
+/// `Ray::from_asset(amount, 7).div_floor(index)`: the scaled units a supply of
+/// `amount` (7 decimals) credits.
+fn ray_scaled_floor(e: &Env, amount: i128, index: i128) -> i128 {
+    mul_div_floor(e, amount * SCALED_UNIT, RAY, index)
+}
+
+/// The ceiling counterpart, for withdrawals.
+fn ray_scaled_ceil(e: &Env, amount: i128, index: i128) -> i128 {
+    let floor = ray_scaled_floor(e, amount, index);
+    if ray_to_assets(e, floor, index) < amount {
+        floor + 1
+    } else {
+        floor
+    }
+}
+
+/// `scaled * index / RAY`, back at 7 decimals: what `get_collateral_amount`
+/// reports.
+fn ray_to_assets(e: &Env, scaled: i128, index: i128) -> i128 {
+    mul_div_floor(e, scaled, index, RAY) / SCALED_UNIT
+}
 
 #[contracttype]
 pub enum MockKey {
@@ -75,13 +104,13 @@ impl MockController {
         e.storage().instance().set(&MockKey::Index, &index);
     }
 
-    /// Credit an account without any vault share being minted — a third party
+    /// Credit an account without any vault share being minted: a third party
     /// supplying into someone else's position.
     pub fn donate(e: Env, from: Address, account_id: u64, amount: i128) {
         let key = Self::hub_asset(e.clone());
         TokenClient::new(&e, &key.asset).transfer(&from, &e.current_contract_address(), &amount);
         let index = Self::index(e.clone());
-        let delta = assets_to_shares(&e, amount, index);
+        let delta = ray_scaled_floor(&e, amount, index);
         let scaled = Self::scaled(e.clone(), account_id) + delta;
         e.storage()
             .instance()
@@ -89,6 +118,7 @@ impl MockController {
         Self::bump_total(&e, delta);
     }
 
+    /// The account's raw Ray-scaled position, as the real controller stores it.
     pub fn scaled(e: Env, account_id: u64) -> i128 {
         e.storage()
             .instance()
@@ -120,8 +150,8 @@ impl MockController {
             account_id
         };
 
-        // Credit floors — the depositor never gains from rounding.
-        let delta = assets_to_shares(&e, amount, index);
+        // Credit floors: the depositor never gains from rounding.
+        let delta = ray_scaled_floor(&e, amount, index);
         let scaled = Self::scaled(e.clone(), id) + delta;
         e.storage().instance().set(&MockKey::Scaled(id), &scaled);
         Self::bump_total(&e, delta);
@@ -141,18 +171,13 @@ impl MockController {
 
         // A requested amount of zero means "everything in this market".
         let amount = if requested == 0 {
-            shares_to_assets(&e, scaled, index)
+            ray_to_assets(&e, scaled, index)
         } else {
             requested
         };
 
-        // The burn ceils — the protocol never loses to rounding.
-        let floor = assets_to_shares(&e, amount, index);
-        let burn = if shares_to_assets(&e, floor, index) < amount {
-            floor + 1
-        } else {
-            floor
-        };
+        // The burn ceils: the protocol never loses to rounding.
+        let burn = ray_scaled_ceil(&e, amount, index);
         assert!(burn <= scaled, "withdraw exceeds position");
 
         e.storage()
@@ -172,7 +197,7 @@ impl MockController {
 
     pub fn get_collateral_amount(e: Env, account_id: u64, _hub_asset: HubAssetKey) -> i128 {
         let index = Self::index(e.clone());
-        shares_to_assets(&e, Self::scaled(e.clone(), account_id), index)
+        ray_to_assets(&e, Self::scaled(e.clone(), account_id), index)
     }
 
     pub fn get_market_index(e: Env, _hub_asset: HubAssetKey) -> MarketIndexRaw {
@@ -239,6 +264,8 @@ impl MockController {
         }
     }
 
+    /// Ray-scaled, like the stored positions: `SpokeUsageRaw` is what the
+    /// controller enforces caps against, in the same unit.
     pub fn get_spoke_usage(e: Env, _spoke_id: u32, _hub_asset: HubAssetKey) -> SpokeUsageRaw {
         SpokeUsageRaw {
             borrowed_scaled_ray: 0,
@@ -256,7 +283,7 @@ impl MockController {
     // ── internals ───────────────────────────────────────────────────────────
 
     /// Keeps the spoke's market-wide usage in step with per-account balances,
-    /// so `get_spoke_usage` — and therefore `max_deposit` — answers truthfully.
+    /// so `get_spoke_usage`, and therefore `max_deposit`, answers truthfully.
     fn bump_total(e: &Env, delta: i128) {
         let total = Self::total_scaled(e.clone()) + delta;
         e.storage().instance().set(&MockKey::TotalScaled, &total);

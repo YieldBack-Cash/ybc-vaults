@@ -11,7 +11,7 @@ use crate::controller::{ControllerClient, HubAssetKey};
 use crate::errors::XoxnoError;
 use crate::events::account_opened;
 use crate::storage::{self, Config};
-use crate::vault::shares_to_assets;
+use crate::vault::{ray_scaled_to_shares, shares_to_assets, ASSET_DECIMALS};
 
 #[contract]
 pub struct XoxnoVault;
@@ -26,17 +26,20 @@ fn hub_asset(cfg: &Config) -> HubAssetKey {
     }
 }
 
-/// The vault's scaled position, or 0 before it has opened an account.
+/// The vault's scaled position at asset precision, or 0 before it has opened
+/// an account. The controller reports a Ray (27-decimal) figure; see
+/// `vault::SCALED_UNIT`.
 fn scaled_position(controller: &ControllerClient, account_id: u64, key: &HubAssetKey) -> i128 {
     if account_id == 0 {
         return 0;
     }
-    controller
+    let raw = controller
         .get_account_positions(&account_id)
         .0
         .get(key.clone())
         .map(|p| p.scaled_amount)
-        .unwrap_or(0)
+        .unwrap_or(0);
+    ray_scaled_to_shares(raw)
 }
 
 #[contractimpl]
@@ -47,7 +50,8 @@ impl XoxnoVault {
     ///
     /// The `get_market_index` call is a probe: it reverts if that market is not
     /// listed on that hub, so a typo in `hub_id` fails at deployment rather than
-    /// at the first deposit.
+    /// at the first deposit. The `decimals()` probe pins the asset precision the
+    /// Ray-to-share conversion assumes.
     pub fn __constructor(
         e: Env,
         controller: Address,
@@ -60,6 +64,9 @@ impl XoxnoVault {
     ) {
         if storage::has_config(&e) {
             panic_with_error!(&e, vault_common::VaultError::AlreadyInitialized);
+        }
+        if TokenClient::new(&e, &asset).decimals() != ASSET_DECIMALS {
+            panic_with_error!(&e, XoxnoError::UnsupportedDecimals);
         }
 
         let client = ControllerClient::new(&e, &controller);
@@ -85,7 +92,7 @@ impl XoxnoVault {
         // 7 decimals matches the underlying Stellar asset contract and the
         // 1e7 fixed-point scale consumers assume; there is no virtual offset to
         // account for, because this vault needs no inflation cushion.
-        Base::set_metadata(&e, 7, name, symbol);
+        Base::set_metadata(&e, ASSET_DECIMALS, name, symbol);
         ttl::extend_instance_ttl(&e);
     }
 
@@ -145,13 +152,12 @@ impl XoxnoVault {
         }
 
         let index = controller.get_market_index(&key).supply_index;
-        let supplied = shares_to_assets(
-            e,
+        let supplied_scaled = ray_scaled_to_shares(
             controller
                 .get_spoke_usage(&cfg.spoke_id, &key)
                 .supplied_scaled_ray,
-            index,
         );
+        let supplied = shares_to_assets(e, supplied_scaled, index);
 
         if spoke_asset.supply_cap <= supplied {
             0
@@ -175,7 +181,9 @@ impl XoxnoVault {
     /// The share count is **measured**, not computed: XOXNO's own rounding
     /// decides how many scaled units the supply credited, and a locally computed
     /// guess that floored differently would break the
-    /// `total_supply <= scaled_position` invariant cumulatively rather than once.
+    /// `total_supply * SCALED_UNIT <= scaled_position` invariant cumulatively
+    /// rather than once. Sub-share dust from the Ray-to-share floor stays in
+    /// the position, on the vault's side.
     pub fn deposit(
         e: &Env,
         assets: i128,

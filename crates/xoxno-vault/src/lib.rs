@@ -11,8 +11,9 @@
 //!
 //! That is already the tokenized-vault share primitive: a fixed claim on a
 //! growing pool. So this vault does not invent a second one. **Vault shares are
-//! 1:1 with XOXNO scaled units**, and the exchange rate *is* the market's supply
-//! index.
+//! XOXNO's scaled units at asset precision**, and the exchange rate *is* the
+//! market's supply index. XOXNO keeps `scaled_amount` as a 27-decimal Ray; one
+//! share is `10^20` of those for a 7-decimal asset (`vault::SCALED_UNIT`).
 //!
 //! This is the same choice Pendle makes wrapping Aave: `PendleAaveV3SY` mirrors
 //! Aave's scaled balance against the liquidity index rather than running its own
@@ -21,7 +22,7 @@
 //! # The invariant
 //!
 //! ```text
-//! total_supply  <=  the vault's XOXNO scaled position
+//! total_supply * SCALED_UNIT  <=  the vault's XOXNO scaled position (Ray)
 //! ```
 //!
 //! Deposits mint exactly the scaled delta XOXNO credited, so the two track

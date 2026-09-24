@@ -16,6 +16,28 @@ fn first_deposit_opens_an_account_and_mints_shares() {
     assert_ne!(f.vault.account_id(), 0, "account should have been opened");
 }
 
+/// The controller stores positions as 27-decimal Rays; shares are that figure
+/// at asset precision. Pins both the vault's conversion and the mock's
+/// fidelity to the real protocol, which a testnet simulation found wanting:
+/// the first mock stored 7-decimal units and the vault minted 1e20 shares per
+/// stroop against the real controller.
+#[test]
+fn shares_are_the_ray_position_at_asset_precision() {
+    use crate::vault::SCALED_UNIT;
+
+    let f = VaultFixture::new();
+    let minted = f.vault.deposit(&1_000_0000000, &f.user, &f.user, &f.user);
+
+    let raw = f.controller.scaled(&f.vault.account_id());
+    assert_eq!(
+        raw,
+        minted * SCALED_UNIT,
+        "controller position is Ray-scaled"
+    );
+    assert_eq!(minted, 1_000_0000000, "shares are at 7 decimals");
+    assert_eq!(f.vault.max_withdraw(&f.user), 1_000_0000000);
+}
+
 #[test]
 fn second_deposit_reuses_the_same_account() {
     let f = VaultFixture::new();

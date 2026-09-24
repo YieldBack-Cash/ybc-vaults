@@ -14,4 +14,8 @@ pub enum XoxnoError {
 
     /// A redeem before the vault has ever opened a XOXNO account.
     NoAccount = 301,
+
+    /// The underlying asset's `decimals()` is not 7. Shares are fixed at 7
+    /// decimals and the Ray-to-share conversion is derived from it.
+    UnsupportedDecimals = 302,
 }
