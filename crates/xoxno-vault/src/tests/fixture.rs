@@ -6,7 +6,7 @@ use soroban_sdk::{
 use vault_testkit::ConformanceFixture;
 
 use crate::contract::{XoxnoVault, XoxnoVaultClient};
-use crate::controller::RAY;
+use crate::lending::constants::RAY;
 use crate::testutils::{MockController, MockControllerClient};
 
 pub const HUB_ID: u32 = 1;
@@ -105,8 +105,8 @@ impl<'a> VaultFixture<'a> {
             .set_supply_index(&(index - index * bps / 10_000));
     }
 
-    pub fn hub_asset(&self) -> crate::controller::HubAssetKey {
-        crate::controller::HubAssetKey {
+    pub fn hub_asset(&self) -> crate::lending::controller::HubAssetKey {
+        crate::lending::controller::HubAssetKey {
             asset: self.asset.clone(),
             hub_id: HUB_ID,
         }

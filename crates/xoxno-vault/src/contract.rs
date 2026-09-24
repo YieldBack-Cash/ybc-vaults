@@ -1,15 +1,15 @@
 use soroban_sdk::{
-    auth::{ContractContext, InvokerContractAuthEntry, SubContractInvocation},
-    contract, contractimpl, panic_with_error,
-    token::TokenClient,
-    vec, Address, Env, IntoVal, String, Symbol,
+    contract, contractimpl, panic_with_error, token::TokenClient, vec, Address, Env, String,
 };
 use stellar_tokens::fungible::Base;
 use vault_common::{auth::spend_operator_allowance, events, guard::require_positive, sweep, ttl};
 
-use crate::controller::{ControllerClient, HubAssetKey};
 use crate::errors::XoxnoError;
 use crate::events::account_opened;
+use crate::lending::constants::{NEW_ACCOUNT, WITHDRAW_ALL};
+use crate::lending::controller::HubAssetKey;
+use crate::lending::helpers::authorize_transfer_as_current;
+use crate::lending::ControllerClient;
 use crate::storage::{self, Config};
 use crate::vault::{ray_scaled_to_shares, shares_to_assets, ASSET_DECIMALS};
 
@@ -30,7 +30,7 @@ fn hub_asset(cfg: &Config) -> HubAssetKey {
 /// an account. The controller reports a Ray (27-decimal) figure; see
 /// `vault::SCALED_UNIT`.
 fn scaled_position(controller: &ControllerClient, account_id: u64, key: &HubAssetKey) -> i128 {
-    if account_id == 0 {
+    if account_id == NEW_ACCOUNT {
         return 0;
     }
     let raw = controller
@@ -124,7 +124,7 @@ impl XoxnoVault {
     pub fn total_assets(e: &Env) -> i128 {
         let cfg = storage::get_config(e);
         let account_id = storage::get_account_id(e);
-        if account_id == 0 {
+        if account_id == NEW_ACCOUNT {
             return 0;
         }
         ControllerClient::new(e, &cfg.controller)
@@ -221,27 +221,17 @@ impl XoxnoVault {
         // XOXNO's pool pulls the tokens out of this contract during `supply`,
         // so that exact transfer has to be pre-authorized. The argument values
         // must match the call the pool will make.
-        e.authorize_as_current_contract(vec![
-            e,
-            InvokerContractAuthEntry::Contract(SubContractInvocation {
-                context: ContractContext {
-                    contract: cfg.asset.clone(),
-                    fn_name: Symbol::new(e, "transfer"),
-                    args: (vault.clone(), cfg.pool.clone(), received).into_val(e),
-                },
-                sub_invocations: vec![e],
-            }),
-        ]);
+        authorize_transfer_as_current(e, &cfg.asset, &vault, &cfg.pool, received);
 
-        // `account_id == 0` is XOXNO's "open me an account on this spoke"
-        // sentinel; the returned id is the vault's from then on.
+        // `NEW_ACCOUNT` is XOXNO's "open me an account on this spoke" sentinel;
+        // the returned id is the vault's from then on.
         let new_id = controller.supply(
             &vault,
             &account_id,
             &cfg.spoke_id,
             &vec![e, (key.clone(), received)],
         );
-        if account_id == 0 {
+        if account_id == NEW_ACCOUNT {
             storage::set_account_id(e, new_id);
             account_opened(e, new_id, cfg.spoke_id);
         }
@@ -277,7 +267,7 @@ impl XoxnoVault {
         let vault = e.current_contract_address();
 
         let account_id = storage::get_account_id(e);
-        if account_id == 0 {
+        if account_id == NEW_ACCOUNT {
             panic_with_error!(e, XoxnoError::NoAccount);
         }
 
@@ -285,9 +275,10 @@ impl XoxnoVault {
         let assets = shares_to_assets(e, shares, index);
 
         // A dust redeem can floor to zero assets. XOXNO reads a withdrawal
-        // amount of zero as "withdraw everything from this market", so passing
-        // it through would empty the entire pooled position. Refuse instead.
-        if assets <= 0 {
+        // amount of `WITHDRAW_ALL` (0) as "withdraw everything from this
+        // market", so passing it through would empty the entire pooled
+        // position. Refuse instead.
+        if assets <= WITHDRAW_ALL {
             panic_with_error!(e, XoxnoError::ZeroAssetRedeem);
         }
 
@@ -320,7 +311,7 @@ impl XoxnoVault {
 
     // ── views ───────────────────────────────────────────────────────────────
 
-    /// The vault's XOXNO account, or 0 before the first deposit.
+    /// The vault's XOXNO account, or `NEW_ACCOUNT` (0) before the first deposit.
     pub fn account_id(e: &Env) -> u64 {
         storage::get_account_id(e)
     }

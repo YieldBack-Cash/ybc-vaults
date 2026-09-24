@@ -30,7 +30,7 @@ and compares WASM hashes, and toolchain drift changes the hash.
 ## Adding an adapter
 
 1. `crates/<protocol>-vault` with a hand-written client for the protocol
-   (`xoxno-vault/src/controller.rs` is the model: declare only the calls you
+   (`xoxno-vault/src/lending/controller.rs` is the model: declare only the calls you
    make, and remember Soroban matches struct fields by *name*).
 2. `#[contract] pub struct MyVault;` then `vault_common::impl_share_token!(MyVault);`
    for SEP-41. Set metadata with 7 decimals in the constructor.

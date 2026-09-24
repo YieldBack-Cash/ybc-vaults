@@ -100,8 +100,9 @@ the positive-amount guard, `sweep`, the TTL policy, the `Deposit`/`Redeem`/
 `tests/conformance.rs` file binds this crate's fixture to `vault-testkit`, which
 runs the same 22 properties against every adapter.
 
-This crate owns only what is XOXNO's: the hand-written controller client
-(`controller.rs`), the account-id sentinel, the index maths (`vault.rs`), the
+This crate owns only what is XOXNO's: the `lending/` mirror of
+`xoxno-contract-sdk` (see below), the account-id sentinel, the index maths
+(`vault.rs`), the
 `max_*`/`total_assets` views, and the two XOXNO-specific errors
 (`ZeroAssetRedeem = 300`, `NoAccount = 301`; shared codes are 10–49,
 OpenZeppelin's are 100–199).
@@ -136,6 +137,47 @@ writes no reward code for that category either; the points issuer maintains
 adapters that read on-chain state and attribute by look-through. That is why the
 events here mark holder addresses as topics: an indexer needs to filter on who
 ended up holding the shares.
+
+## Reference release and the `xoxno-contract-sdk` migration
+
+XOXNO publishes [`xoxno-contract-sdk`](https://crates.io/crates/xoxno-contract-sdk)
+(0.1.0, 2026-09-24, MIT): generated clients, the protocol constants, and a
+`LendingFixture` that deploys the real protocol into a test `Env`. It is built
+on soroban-sdk 28 and its embedded WASM is protocol 28. This workspace is held
+on soroban-sdk 26 by `stellar-tokens` 0.7.2, and a protocol-28 WASM does not
+load on a 26 host (`Error(WasmVm, InvalidInput)`, "contract protocol number is
+newer than host"), so neither linking the crate nor vendoring its binaries
+works until the workspace moves to 28.
+
+Until then `src/lending/` mirrors the slice of the SDK this vault uses, under
+the SDK's own paths, names, constants and doc comments:
+
+| this crate                                  | `xoxno-contract-sdk`                           |
+|---------------------------------------------|------------------------------------------------|
+| `crate::lending::constants::{RAY, NEW_ACCOUNT, WITHDRAW_ALL, …}` | `lending::constants::*`   |
+| `crate::lending::controller::{HubAssetKey, MarketIndexRaw, …}`   | `lending::controller::*`  |
+| `crate::lending::ControllerClient`          | `lending::ControllerClient`                    |
+| `crate::lending::helpers::authorize_transfer_as_current` | `lending::helpers::…`           |
+| `testutils::MockController`                 | `testutils::LendingFixture`                    |
+
+The migration is a path change (`crate::lending` → `xoxno_contract_sdk::lending`),
+deleting `src/lending/`, and swapping the mock for `LendingFixture` in the
+tests. The units this crate assumes are the SDK's documented ones: "Shares,
+indexes and rates are RAY (1e27)", which is what `vault::SCALED_UNIT` converts
+from.
+
+Every struct field and the nine controller signatures used here were checked
+with `stellar contract info interface` against both of these and match:
+
+| binary | protocol | SHA-256 |
+|---|---|---|
+| SDK 0.1.0 `wasm/deploy/controller.wasm` (rs-lending-xlm `v1.1.0`, commit `1053ae0`, mainnet `CAUCMIN5…`) | 28 | `2dd536b06aab811801b5f3f2ad44629910b825c1535f85b420d16bbc4e6ce8b2` |
+| SDK 0.1.0 `wasm/deploy/pool.wasm` (mainnet `CBXRNDQM…`) | 28 | `510246738d4533c4f30cb509a0497c1940856c1093d34a963e7ba7a47ff3c3bc` |
+| testnet controller `CCXRWJ6S…` (the deployment this vault runs against) | 27 | `dd6dd50bc0bbf2834bfa2215bc66f6911aeba05c984a42590fe37df4da46e29d` |
+
+The v1.1.0 controller adds `get_spoke_asset_flags_epoch` and
+`relax_spoke_asset_flags` over the testnet build; nothing this vault calls
+changed.
 
 ## Status
 

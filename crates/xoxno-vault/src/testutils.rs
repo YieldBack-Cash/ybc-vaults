@@ -28,9 +28,10 @@ use soroban_sdk::{
 };
 use vault_common::math::mul_div_floor;
 
-use crate::controller::{
+use crate::lending::constants::{NEW_ACCOUNT, RAY, WITHDRAW_ALL};
+use crate::lending::controller::{
     AccountPositionRaw, DebtPositionRaw, HubAssetKey, MarketIndexRaw, SpokeAssetConfig,
-    SpokeUsageRaw, RAY,
+    SpokeUsageRaw,
 };
 use crate::vault::SCALED_UNIT;
 
@@ -141,7 +142,7 @@ impl MockController {
         // The vault pre-authorized exactly this transfer before calling.
         TokenClient::new(&e, &key.asset).transfer(&caller, &e.current_contract_address(), &amount);
 
-        let id = if account_id == 0 {
+        let id = if account_id == NEW_ACCOUNT {
             let next: u64 = e.storage().instance().get(&MockKey::NextId).unwrap_or(1);
             e.storage().instance().set(&MockKey::NextId, &(next + 1));
             e.storage().instance().set(&MockKey::Spoke(next), &spoke_id);
@@ -170,7 +171,7 @@ impl MockController {
         let scaled = Self::scaled(e.clone(), account_id);
 
         // A requested amount of zero means "everything in this market".
-        let amount = if requested == 0 {
+        let amount = if requested == WITHDRAW_ALL {
             ray_to_assets(&e, scaled, index)
         } else {
             requested

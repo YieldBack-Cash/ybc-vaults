@@ -1,6 +1,8 @@
 use soroban_sdk::{contracttype, panic_with_error, Address, Env};
 use vault_common::VaultError;
 
+use crate::lending::constants::NEW_ACCOUNT;
+
 /// Set once at construction and never mutated.
 ///
 /// `hub_id` and `spoke_id` are constructor parameters rather than constants on
@@ -42,12 +44,17 @@ pub fn get_config(e: &Env) -> Config {
         .unwrap_or_else(|| panic_with_error!(e, VaultError::NotInitialized))
 }
 
-/// The vault's XOXNO account, or `0` if it has not opened one yet.
+/// The vault's XOXNO account, or `NEW_ACCOUNT` (0) if it has not opened one
+/// yet.
 ///
-/// `0` is also XOXNO's "create me an account" sentinel on `supply`, so the same
-/// value means "none yet" in both directions and needs no separate flag.
+/// `NEW_ACCOUNT` is also XOXNO's "create me an account" sentinel on `supply`,
+/// so the same value means "none yet" in both directions and needs no separate
+/// flag.
 pub fn get_account_id(e: &Env) -> u64 {
-    e.storage().instance().get(&DataKey::AccountId).unwrap_or(0)
+    e.storage()
+        .instance()
+        .get(&DataKey::AccountId)
+        .unwrap_or(NEW_ACCOUNT)
 }
 
 /// Written once, on the first successful supply, and never cleared.

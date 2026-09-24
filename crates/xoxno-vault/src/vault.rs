@@ -21,7 +21,7 @@
 use soroban_sdk::Env;
 use vault_common::math::mul_div_floor;
 
-use crate::controller::RAY;
+use crate::lending::constants::RAY;
 
 /// The only asset precision this vault supports. Share metadata is 7 decimals
 /// and every YBC consumer assumes the 1e7 scale, so the constructor refuses an

@@ -2,7 +2,7 @@
 //! bug in a plausible alternative implementation.
 
 use super::fixture::VaultFixture;
-use crate::controller::RAY;
+use crate::lending::constants::RAY;
 use crate::testutils::DEFAULT_SUPPLY_CAP;
 
 /// The sharpest edge in the whole integration.

@@ -47,13 +47,13 @@
 //! The share token, the operator-allowance rule, the positive-amount guard,
 //! `sweep`, the TTL policy, the `Deposit`/`Redeem`/`Sweep` events and the
 //! widening multiply all come from `vault_common`. This crate holds only what
-//! is XOXNO's: the controller client, the account sentinel, and the index
-//! maths.
+//! is XOXNO's: the `lending` mirror of `xoxno-contract-sdk`, the account
+//! sentinel, and the index maths.
 
 mod contract;
-mod controller;
 mod errors;
 mod events;
+mod lending;
 mod storage;
 mod vault;
 
@@ -64,7 +64,9 @@ pub mod testutils;
 mod tests;
 
 pub use crate::contract::{XoxnoVault, XoxnoVaultArgs, XoxnoVaultClient};
-pub use crate::controller::{ControllerClient, HubAssetKey, MarketIndexRaw, RAY};
 pub use crate::errors::XoxnoError;
+pub use crate::lending::constants::RAY;
+pub use crate::lending::controller::{HubAssetKey, MarketIndexRaw};
+pub use crate::lending::ControllerClient;
 pub use crate::storage::Config;
 pub use vault_common::VaultError;
