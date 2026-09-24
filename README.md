@@ -44,8 +44,9 @@ and compares WASM hashes, and toolchain drift changes the hash.
    `vault_testkit::ConformanceFixture`, and one line:
    `vault_testkit::conformance_tests!(Fixture::new());`
 
-Nothing in `ybc-contracts`, the indexer or the frontend changes unless the
-protocol needs a new reading of `get_config() -> (protocol, asset)`.
+Nothing in `ybc-contracts`, the indexer or the frontend changes: the indexer
+learns the protocol behind a vault from `get_protocol() -> Address`, the one
+informational view every adapter exposes beyond SEP-56 and `sweep`.
 
 ## History
 

@@ -52,7 +52,9 @@ redeem(shares: i128, receiver: Address, owner: Address, operator: Address) -> i1
 
 Plus the full SEP-41 token surface on the same address (consumers custody these
 shares and hold them as an AMM reserve), and three extras: `total_assets`,
-`max_deposit`, `max_withdraw`.
+`max_deposit`, `max_withdraw`, and `get_protocol() -> Address` (the XOXNO
+controller): informational, read by the YBC indexer so a curator can confirm
+the protocol behind a vault. Not part of SEP-56; nothing on chain calls it.
 
 `sweep` is the only privileged function. It moves a stray token — an airdrop that
 landed on the vault's address — to a configured destination, and **hard-refuses

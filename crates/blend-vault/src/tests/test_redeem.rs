@@ -64,7 +64,8 @@ fn test_redeem_accounting_matches_pool_position() {
     let e = Env::default();
     let (vault, _usdc, samwise, _frodo) = setup(&e);
     let vault_client = BlendVaultClient::new(&e, &vault);
-    let (pool, asset) = vault_client.get_config();
+    let pool = vault_client.get_protocol();
+    let asset = vault_client.query_asset();
     let pool_client = PoolClient::new(&e, &pool);
     let reserve_index = pool_client.get_reserve(&asset).config.index;
 

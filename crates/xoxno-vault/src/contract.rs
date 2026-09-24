@@ -320,11 +320,14 @@ impl XoxnoVault {
         storage::get_config(e)
     }
 
-    /// `(protocol, asset)`: the same shape every adapter exposes, so the YBC
-    /// indexer can record which protocol a vault lends into without knowing
-    /// the adapter. For XOXNO the protocol address is the controller.
-    pub fn get_config(e: &Env) -> (Address, Address) {
-        let cfg = storage::get_config(e);
-        (cfg.controller, cfg.asset)
+    /// The protocol contract this vault supplies to: the XOXNO controller.
+    ///
+    /// Informational only. Nothing on chain calls it: the YBC indexer reads it
+    /// so a curator can confirm which protocol a vault is built on before
+    /// listing its markets. Every adapter in the workspace exposes it with
+    /// this exact signature. Not part of SEP-56; the underlying asset comes
+    /// from the standard's `query_asset`.
+    pub fn get_protocol(e: &Env) -> Address {
+        storage::get_config(e).controller
     }
 }

@@ -3,23 +3,45 @@
   "passphrase": "Test SDF Network ; September 2015",
   "contracts": {
     "xoxno_vault": {
-      "id": "CCJIXIZFO4V5GA4WX6JOZFALCZVPJVUG4ZCI3BWX3NKQFK5LFH2ZQEWG",
-      "wasm_hash": "9dd4924d5952b44780459c856f5f1dace99bfe16b9bae328f1702caec65c4fca",
-      "deployed_at": "2026-09-24T00:00:00Z",
+      "id": "CDWPBNNTZRIIHVU42NEC2EQ5PDDQAAU7KAKI5A7BUV2WAC7X7W3S363W",
+      "wasm_hash": "be8f61313954c15d189d8f4e199c1071a138fb93bb830c212b0d751fbc1718ff",
+      "deployed_at": "2026-09-24T17:50:00Z",
       "admin": "GBY3LP4JSZMAQGDAIPJIRF6QKA6MNRIJEFEEK3GNB2GA7W4RERE3II3B",
       "controller": "CCXRWJ6SIU2WPFEGLFGJVITPL57QAYIMIO6OAM2NBGNDQSSCK2FFV3F3",
       "asset": "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC",
       "hub_id": 1,
       "spoke_id": 1,
-      "xoxno_account_id": 34,
-      "share_token": { "name": "XOXNO XLM Vault", "symbol": "xvXLM" },
-      "note": "Backs YBC market xvXLM-1797984000; a 10 XLM router round trip was verified live on 2026-09-24 (99,994,738 shares at index 1.0000526)."
+      "share_token": {
+        "name": "XOXNO XLM Vault",
+        "symbol": "xvXLM"
+      },
+      "note": "Rebuilt with get_protocol() -> Address replacing get_config() -> (protocol, asset): the one informational view beyond SEP-56, read by the YBC indexer for curation. Vaults are not upgradeable, so this is a fresh deployment. Backs YBC market xvXLM-23DEC2026 (create_market tx a437b139)."
     },
-    "xoxno_vault_superseded": {
-      "id": "CATV62ZYZSRP5HIU3I3JB7PN25V6GLH3THHSAY536SED33MHZYBBG3UG",
-      "wasm_hash": "f68110b034f653013e678a5849d95bd1804d3c91014abcf998d9be20dde8f71f",
-      "deployed_at": "2026-09-24T00:00:00Z",
-      "note": "DO NOT USE. Built before the Ray-unit fix (commit eaa4289): it read XOXNO's 27-decimal scaled_amount as the share count. A simulated 10 XLM deposit minted 9.99e27 shares. Its YBC market exists on the factory and must stay unlisted."
-    }
+    "xoxno_vault_superseded": [
+      {
+        "id": "CCJIXIZFO4V5GA4WX6JOZFALCZVPJVUG4ZCI3BWX3NKQFK5LFH2ZQEWG",
+        "wasm_hash": "9dd4924d5952b44780459c856f5f1dace99bfe16b9bae328f1702caec65c4fca",
+        "deployed_at": "2026-09-24T00:00:00Z",
+        "admin": "GBY3LP4JSZMAQGDAIPJIRF6QKA6MNRIJEFEEK3GNB2GA7W4RERE3II3B",
+        "controller": "CCXRWJ6SIU2WPFEGLFGJVITPL57QAYIMIO6OAM2NBGNDQSSCK2FFV3F3",
+        "asset": "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC",
+        "hub_id": 1,
+        "spoke_id": 1,
+        "xoxno_account_id": 34,
+        "share_token": {
+          "name": "XOXNO XLM Vault",
+          "symbol": "xvXLM"
+        },
+        "note": "Superseded 2026-09-24: had get_config(); replaced by the get_protocol() build. Previous note: Backs YBC market xvXLM-1797984000; a 10 XLM router round trip was verified live on 2026-09-24 (99,994,738 shares at index 1.0000526).",
+        "superseded_on": "2026-09-24",
+        "superseded_by": "CDWPBNNTZRIIHVU42NEC2EQ5PDDQAAU7KAKI5A7BUV2WAC7X7W3S363W"
+      },
+      {
+        "id": "CATV62ZYZSRP5HIU3I3JB7PN25V6GLH3THHSAY536SED33MHZYBBG3UG",
+        "wasm_hash": "f68110b034f653013e678a5849d95bd1804d3c91014abcf998d9be20dde8f71f",
+        "deployed_at": "2026-09-24T00:00:00Z",
+        "note": "DO NOT USE. Built before the Ray-unit fix (commit eaa4289): it read XOXNO's 27-decimal scaled_amount as the share count. A simulated 10 XLM deposit minted 9.99e27 shares. Its YBC market exists on the factory and must stay unlisted."
+      }
+    ]
   }
 }

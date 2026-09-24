@@ -223,10 +223,8 @@ fn test_happy_path() {
 
     // vault state agrees with the share ledger
     let vault_data = blend_vault_client.get_vault();
-    assert_eq!(
-        blend_vault_client.get_config(),
-        (pool.clone(), usdc.clone())
-    );
+    assert_eq!(blend_vault_client.get_protocol(), pool);
+    assert_eq!(blend_vault_client.query_asset(), usdc);
     assert_eq!(blend_vault_client.get_admin(), gandalf);
     let frodo_shares = blend_vault_client.balance(&frodo);
     let samwise_shares = blend_vault_client.balance(&samwise);

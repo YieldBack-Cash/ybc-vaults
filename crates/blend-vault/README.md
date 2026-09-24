@@ -29,10 +29,12 @@ deposit(assets: i128, receiver: Address, from: Address, operator: Address) -> i1
 redeem(shares: i128, receiver: Address, owner: Address, operator: Address) -> i128
 ```
 
-Plus the full SEP-41 token surface on the same address, and `total_assets`,
-`max_deposit`, `max_withdraw`, `get_config() -> (pool, asset)`: the same shape
-every adapter in this workspace exposes. Blend-specific views are `get_vault`
-(the ratio state) and `get_b_tokens`.
+Plus the full SEP-41 token surface on the same address, `total_assets`,
+`max_deposit`, `max_withdraw`, and `get_protocol() -> Address` (the Blend
+pool). `get_protocol` is the one view beyond SEP-56 that every adapter in this
+workspace exposes; it is informational, read by the YBC indexer so a curator
+can confirm the protocol behind a vault, and nothing on chain calls it.
+Blend-specific views are `get_vault` (the ratio state) and `get_b_tokens`.
 
 Operations: `set_admin`, `set_router`, `sweep` (admin) and `claim_emissions`
 (anyone; the caller sets the swap's slippage floor).
