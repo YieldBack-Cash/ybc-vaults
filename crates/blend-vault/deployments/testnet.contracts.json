@@ -3,9 +3,21 @@
   "passphrase": "Test SDF Network ; September 2015",
   "contracts": {
     "blend_vault": {
+      "id": "CDZ7BFDTINFUNXSL2NNP7JGDKIXNGUFDYXTBVZSF72VRK5Z5VMWZYDFD",
+      "wasm_hash": "15a8e5355f1982aa2eb8acaf2f6c7257fc05edc27d85e20191c32dfbbd4a9976",
+      "deployed_at": "2026-09-24T00:00:00Z",
+      "admin": "GBY3LP4JSZMAQGDAIPJIRF6QKA6MNRIJEFEEK3GNB2GA7W4RERE3II3B",
+      "pool": "CCEBVDYM32YNYCVNRXQKDFFPISJJCV557CDZEIRBEE4NCV4KHPQ44HGF",
+      "asset": "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC",
+      "blnd_token": "CB22KRA3YZVCNCQI64JQ5WE7UY2VAV7WFLK6A2JN3HEX56T2EDAFO7QF",
+      "share_token": { "name": "Blend XLM Vault", "symbol": "bvXLM" },
+      "note": "First deployment from this workspace (OpenZeppelin Base share token). Backs YBC market bvXLM-1797984000; a 10 XLM router round trip was verified live on 2026-09-24."
+    },
+    "blend_vault_v2_superseded": {
       "id": "CCWNH24WDHWW6U7LPZ3K2TFLF7IVOKGN6GQMJXUCTYV6Z7AQ6BX7FYGB",
       "wasm_hash": "1486725ed61cdc8ecf7121b4fa1f7fc06dec65160e0d1389533a9437835d9993",
-      "deployed_at": "2026-07-27T17:48:41Z"
+      "deployed_at": "2026-07-27T17:48:41Z",
+      "note": "Pre-workspace build with the hand-rolled share token (self-transfer bug, threat model F-2). Still backs the three YBC markets created before 2026-09-24."
     }
   }
 }
