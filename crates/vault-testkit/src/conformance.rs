@@ -2,7 +2,7 @@
 //!
 //! Register entries in brackets refer to `ybc-contracts/docs/THREAT_MODEL.md`.
 
-use soroban_sdk::{testutils::Address as _, token::StellarAssetClient, Address};
+use soroban_sdk::{testutils::Address as _, Address};
 
 use crate::{
     actor, assert_contract_error, assert_failed, deposit_for, expiry, shares, underlying, vault,
@@ -241,62 +241,4 @@ pub fn a_write_down_is_reported_honestly(f: &impl ConformanceFixture) {
 
     let after = vault(f).convert_to_assets(&ONE);
     assert!(after < before, "write-down hidden: {before} -> {after}");
-}
-
-// ── sweep ───────────────────────────────────────────────────────────────────
-
-fn stray_token(f: &impl ConformanceFixture) -> Address {
-    let issuer = Address::generate(f.env());
-    f.env().register_stellar_asset_contract_v2(issuer).address()
-}
-
-pub fn sweep_moves_a_stray_token(f: &impl ConformanceFixture) {
-    let airdrop = stray_token(f);
-    StellarAssetClient::new(f.env(), &airdrop).mint(&f.vault(), &(500 * ONE));
-
-    vault(f).sweep(&airdrop, &f.admin(), &(500 * ONE));
-
-    let t = soroban_sdk::token::TokenClient::new(f.env(), &airdrop);
-    assert_eq!(t.balance(&f.admin()), 500 * ONE);
-    assert_eq!(t.balance(&f.vault()), 0);
-}
-
-pub fn sweep_refuses_the_underlying_and_the_share_token(f: &impl ConformanceFixture) {
-    let user = actor(f);
-    deposit_for(f, &user);
-
-    assert_contract_error(
-        vault(f).try_sweep(&f.asset(), &f.admin(), &1),
-        VaultError::SweepForbidden as u32,
-    );
-    assert_contract_error(
-        vault(f).try_sweep(&f.vault(), &f.admin(), &1),
-        VaultError::SweepForbidden as u32,
-    );
-}
-
-pub fn sweep_rejects_a_non_positive_amount(f: &impl ConformanceFixture) {
-    let airdrop = stray_token(f);
-    assert_contract_error(
-        vault(f).try_sweep(&airdrop, &f.admin(), &0),
-        VaultError::AmountNotPositive as u32,
-    );
-    assert_contract_error(
-        vault(f).try_sweep(&airdrop, &f.admin(), &-1),
-        VaultError::AmountNotPositive as u32,
-    );
-}
-
-pub fn sweep_cannot_touch_depositor_funds(f: &impl ConformanceFixture) {
-    let user = actor(f);
-    let minted = deposit_for(f, &user);
-    let airdrop = stray_token(f);
-    StellarAssetClient::new(f.env(), &airdrop).mint(&f.vault(), &ONE);
-
-    vault(f).sweep(&airdrop, &f.admin(), &ONE);
-
-    assert_eq!(shares(f).balance(&user), minted);
-    let paid = vault(f).redeem(&minted, &user, &user, &user);
-    assert!(paid > 0 && paid <= DEPOSIT, "full exit still pays: {paid}");
-    assert_eq!(shares(f).balance(&user), 0);
 }

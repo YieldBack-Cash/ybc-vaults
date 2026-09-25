@@ -3,7 +3,8 @@ use vault_common::VaultError;
 
 use crate::lending::constants::NEW_ACCOUNT;
 
-/// Set once at construction and never mutated.
+/// Set once at construction and never mutated. There is no admin: nothing in
+/// this contract is privileged.
 ///
 /// `hub_id` and `spoke_id` are constructor parameters rather than constants on
 /// purpose: an account's spoke binding is permanent, so baking a choice into the
@@ -16,9 +17,6 @@ pub struct Config {
     /// pre-authorize the pool pulling tokens out of it during a supply.
     pub pool: Address,
     pub asset: Address,
-    /// Authorized for `sweep` and nothing else. It cannot touch the underlying
-    /// asset, the share token, or the lending position.
-    pub admin: Address,
     pub hub_id: u32,
     pub spoke_id: u32,
 }

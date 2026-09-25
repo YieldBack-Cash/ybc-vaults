@@ -2,7 +2,7 @@ use soroban_sdk::{
     contract, contractimpl, panic_with_error, token::TokenClient, vec, Address, Env, String,
 };
 use stellar_tokens::fungible::Base;
-use vault_common::{auth::spend_operator_allowance, events, guard::require_positive, sweep, ttl};
+use vault_common::{auth::spend_operator_allowance, events, guard::require_positive, ttl};
 
 use crate::errors::XoxnoError;
 use crate::events::account_opened;
@@ -56,7 +56,6 @@ impl XoxnoVault {
         e: Env,
         controller: Address,
         asset: Address,
-        admin: Address,
         hub_id: u32,
         spoke_id: u32,
         name: String,
@@ -83,7 +82,6 @@ impl XoxnoVault {
                 controller,
                 pool,
                 asset,
-                admin,
                 hub_id,
                 spoke_id,
             },
@@ -296,17 +294,6 @@ impl XoxnoVault {
 
         events::redeem(e, &owner, &receiver, shares, assets);
         assets
-    }
-
-    // ── operations ──────────────────────────────────────────────────────────
-
-    /// Moves a stray token out of the vault. See `vault_common::sweep` for what
-    /// it refuses; this only adds the admin gate.
-    pub fn sweep(e: &Env, token: Address, to: Address, amount: i128) {
-        let cfg = storage::get_config(e);
-        cfg.admin.require_auth();
-        ttl::extend_instance_ttl(e);
-        sweep::sweep(e, &cfg.asset, &token, &to, amount);
     }
 
     // ── views ───────────────────────────────────────────────────────────────

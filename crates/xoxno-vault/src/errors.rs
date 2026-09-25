@@ -1,8 +1,8 @@
 use soroban_sdk::contracterror;
 
 /// XOXNO-specific errors. Codes 300–399 per the workspace numbering rule in
-/// `vault_common::VaultError`; the shared codes (not-positive amounts, sweep
-/// refusals, initialization) come from there.
+/// `vault_common::VaultError`; the shared codes (not-positive amounts,
+/// initialization) come from there.
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[repr(u32)]

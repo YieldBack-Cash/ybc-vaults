@@ -12,7 +12,7 @@ use soroban_sdk::{
 use stellar_tokens::fungible::Base;
 use vault_common::{
     auth::spend_operator_allowance, events as shared_events, guard::require_positive,
-    math::mul_div_floor, sweep, ttl,
+    math::mul_div_floor, ttl,
 };
 
 #[contract]
@@ -26,7 +26,7 @@ impl BlendVault {
     /// Initializes the vault over one reserve of one Blend pool.
     ///
     /// ### Arguments
-    /// * `admin` - Authorized for `set_admin`, `set_router` and `sweep`
+    /// * `admin` - Authorized for `set_admin` and `set_router`
     /// * `pool` - The Blend pool the vault will supply into
     /// * `asset` - The reserve asset the vault supports
     /// * `blnd_token` - The BLND token, for emissions harvesting
@@ -176,15 +176,6 @@ impl BlendVault {
     }
 
     // ── operations ──────────────────────────────────────────────────────────
-
-    /// Moves a stray token out of the vault. See `vault_common::sweep` for what
-    /// it refuses; this only adds the admin gate. BLND never rests here:
-    /// `claim_emissions` swaps it in the same call.
-    pub fn sweep(e: Env, token: Address, to: Address, amount: i128) {
-        storage::get_admin(&e).require_auth();
-        ttl::extend_instance_ttl(&e);
-        sweep::sweep(&e, &storage::get_asset(&e), &token, &to, amount);
-    }
 
     /// Sets the admin address. Requires auth from both the current and new admin.
     pub fn set_admin(e: Env, admin: Address) {

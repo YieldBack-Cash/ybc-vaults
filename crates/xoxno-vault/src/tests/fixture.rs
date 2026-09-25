@@ -48,7 +48,6 @@ impl<'a> VaultFixture<'a> {
             (
                 controller_address.clone(),
                 asset.clone(),
-                admin.clone(),
                 HUB_ID,
                 SPOKE_ID,
                 String::from_str(&e, "XOXNO USDC Vault"),
@@ -135,10 +134,6 @@ impl ConformanceFixture for VaultFixture<'_> {
 
     fn asset(&self) -> Address {
         self.asset.clone()
-    }
-
-    fn admin(&self) -> Address {
-        self.admin.clone()
     }
 
     fn mint(&self, to: &Address, amount: i128) {

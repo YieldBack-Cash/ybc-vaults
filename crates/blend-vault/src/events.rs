@@ -1,4 +1,4 @@
-//! Blend-specific events. `Deposit`, `Redeem` and `Sweep` are the shared ones
+//! Blend-specific events. `Deposit` and `Redeem` are the shared ones
 //! in `vault_common::events`; the SEP-41 events are OpenZeppelin's.
 
 use soroban_sdk::{contractevent, Address, Env};

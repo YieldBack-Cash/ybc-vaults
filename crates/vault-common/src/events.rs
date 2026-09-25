@@ -33,16 +33,6 @@ pub struct Redeem {
     pub assets: i128,
 }
 
-#[contractevent(topics = ["vault", "sweep"])]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Sweep {
-    #[topic]
-    pub token: Address,
-    #[topic]
-    pub to: Address,
-    pub amount: i128,
-}
-
 pub fn deposit(e: &Env, from: &Address, receiver: &Address, assets: i128, shares: i128) {
     Deposit {
         from: from.clone(),
@@ -59,15 +49,6 @@ pub fn redeem(e: &Env, owner: &Address, receiver: &Address, shares: i128, assets
         receiver: receiver.clone(),
         shares,
         assets,
-    }
-    .publish(e);
-}
-
-pub fn sweep(e: &Env, token: &Address, to: &Address, amount: i128) {
-    Sweep {
-        token: token.clone(),
-        to: to.clone(),
-        amount,
     }
     .publish(e);
 }

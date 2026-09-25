@@ -6,4 +6,3 @@ mod conformance;
 mod deposit;
 mod hazards;
 mod redeem;
-mod sweep;

@@ -1,8 +1,8 @@
 use soroban_sdk::contracterror;
 
 /// Blend-specific errors. Codes 200–299 per the workspace numbering rule in
-/// `vault_common::VaultError`; the shared codes (not-positive amounts, sweep
-/// refusals, initialization) come from there and the share-token codes
+/// `vault_common::VaultError`; the shared codes (not-positive amounts,
+/// initialization) come from there and the share-token codes
 /// (100–114) from OpenZeppelin.
 ///
 /// The fork this crate came from numbered its errors 100–113, which collided

@@ -12,8 +12,8 @@
 //! ```
 //!
 //! The suite talks to the adapter only through the SEP-56 and SEP-41 surfaces
-//! YBC itself uses, plus `sweep`, so it cannot pass on an adapter-private
-//! function YBC would never call.
+//! YBC itself uses, so it cannot pass on an adapter-private function YBC would
+//! never call.
 
 use soroban_sdk::{
     contractclient, testutils::Address as _, token::TokenClient, xdr::ScErrorCode, Address, Env,
@@ -32,9 +32,6 @@ pub trait ConformanceFixture {
     /// The underlying asset's contract.
     fn asset(&self) -> Address;
 
-    /// The address authorized for `sweep`.
-    fn admin(&self) -> Address;
-
     /// Mints `amount` of the underlying to `to`.
     fn mint(&self, to: &Address, amount: i128);
 
@@ -47,7 +44,7 @@ pub trait ConformanceFixture {
     fn write_down(&self, bps: i128) -> bool;
 }
 
-/// The SEP-56 subset YBC calls, plus `total_supply` and `sweep`.
+/// The SEP-56 subset YBC calls, plus `total_supply`.
 #[contractclient(name = "VaultClient")]
 pub trait Sep56Vault {
     fn query_asset(e: &Env) -> Address;
@@ -55,7 +52,6 @@ pub trait Sep56Vault {
     fn deposit(e: &Env, assets: i128, receiver: Address, from: Address, operator: Address) -> i128;
     fn redeem(e: &Env, shares: i128, receiver: Address, owner: Address, operator: Address) -> i128;
     fn total_supply(e: &Env) -> i128;
-    fn sweep(e: &Env, token: Address, to: Address, amount: i128);
 }
 
 pub const ONE: i128 = 1_0000000;
@@ -152,10 +148,6 @@ macro_rules! conformance_tests {
             approve_rejects_a_negative_amount,
             rate_is_non_decreasing_under_accrual,
             a_write_down_is_reported_honestly,
-            sweep_moves_a_stray_token,
-            sweep_refuses_the_underlying_and_the_share_token,
-            sweep_rejects_a_non_positive_amount,
-            sweep_cannot_touch_depositor_funds,
         );
     };
     (@each $fixture:expr; $($name:ident),* $(,)?) => {

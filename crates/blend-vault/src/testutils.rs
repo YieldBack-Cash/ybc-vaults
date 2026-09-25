@@ -583,10 +583,6 @@ impl vault_testkit::ConformanceFixture for BlendConformanceFixture {
         self.asset.clone()
     }
 
-    fn admin(&self) -> Address {
-        self.admin.clone()
-    }
-
     fn mint(&self, to: &Address, amount: i128) {
         StellarAssetClient::new(&self.e, &self.asset).mint(to, &amount);
     }

@@ -16,9 +16,8 @@
 //! * a widening `mul_div_floor` on `U256` ([`math`]): the SDK's `i128` overflows
 //!   on ordinary balances once an index or rate is in the multiplier;
 //! * instance TTL policy ([`ttl`]);
-//! * the `Deposit` / `Redeem` / `Sweep` events, with the holder as a topic so an
+//! * the `Deposit` / `Redeem` events, with the holder as a topic so an
 //!   indexer can attribute by look-through ([`events`]);
-//! * the stray-token `sweep` that hard-refuses depositor funds ([`sweep`]);
 //! * the shared error codes and the numbering rule that keeps adapters and
 //!   OpenZeppelin from colliding ([`errors`]).
 
@@ -27,7 +26,6 @@ pub mod errors;
 pub mod events;
 pub mod guard;
 pub mod math;
-pub mod sweep;
 pub mod token;
 pub mod ttl;
 

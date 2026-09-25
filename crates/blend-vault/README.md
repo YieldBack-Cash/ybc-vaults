@@ -36,16 +36,18 @@ workspace exposes; it is informational, read by the YBC indexer so a curator
 can confirm the protocol behind a vault, and nothing on chain calls it.
 Blend-specific views are `get_vault` (the ratio state) and `get_b_tokens`.
 
-Operations: `set_admin`, `set_router`, `sweep` (admin) and `claim_emissions`
-(anyone; the caller sets the swap's slippage floor).
+Operations: `set_admin`, `set_router` (admin) and `claim_emissions` (anyone;
+the caller sets the swap's slippage floor). Rewards are protocol yield:
+`claim_emissions` swaps BLND into the underlying and supplies it back, so
+there is no admin token-rescue function and nothing an admin can move.
 
 ## What is shared and what is Blend's
 
 The share token (OpenZeppelin `Base`), the operator-allowance rule on `redeem`,
-the positive-amount guard, `sweep`, the TTL policy, the `Deposit`/`Redeem`/
-`Sweep` events and the widening multiply come from `vault-common`.
-`tests/conformance.rs` binds this crate's fixture to `vault-testkit`, which
-runs the same 22 properties against every adapter, here on a real Blend pool.
+the positive-amount guard, the TTL policy, the `Deposit`/`Redeem` events and
+the widening multiply come from `vault-common`. `tests/conformance.rs` binds
+this crate's fixture to `vault-testkit`, which runs the same 18 properties
+against every adapter, here on a real Blend pool.
 
 This crate owns the pool client (`pool.rs`, generated from the vendored
 `wasm/blend/pool.wasm`), the ratio maths (`vault.rs`), emissions harvesting

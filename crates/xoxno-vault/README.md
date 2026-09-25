@@ -56,16 +56,16 @@ shares and hold them as an AMM reserve), and three extras: `total_assets`,
 controller): informational, read by the YBC indexer so a curator can confirm
 the protocol behind a vault. Not part of SEP-56; nothing on chain calls it.
 
-`sweep` is the only privileged function. It moves a stray token — an airdrop that
-landed on the vault's address — to a configured destination, and **hard-refuses
-the underlying asset and the vault's own share token**. Depositor funds are not
-reachable through it, which is the only reason an admin-held sweep is acceptable.
+There is no privileged function and no admin. XOXNO has no on-chain rewards to
+harvest (see "There is no harvest" below), and a token that lands on the vault
+address by accident stays there: an admin rescue was judged not worth the
+trust it requires.
 
 ## Deployment
 
 ```bash
 stellar contract deploy --wasm target/wasm32v1-none/release/xoxno_vault.wasm \
-  -- --controller <CONTROLLER> --asset <USDC_SAC> --admin <ADMIN> \
+  -- --controller <CONTROLLER> --asset <USDC_SAC> \
      --hub-id 1 --spoke-id 1 --name "XOXNO USDC Vault" --symbol xvUSDC
 ```
 
@@ -97,10 +97,10 @@ script.
 ## What is shared and what is XOXNO's
 
 The share token (OpenZeppelin `Base`), the operator-allowance rule on `redeem`,
-the positive-amount guard, `sweep`, the TTL policy, the `Deposit`/`Redeem`/
-`Sweep` events and the widening multiply come from `vault-common`. The
-`tests/conformance.rs` file binds this crate's fixture to `vault-testkit`, which
-runs the same 22 properties against every adapter.
+the positive-amount guard, the TTL policy, the `Deposit`/`Redeem` events and
+the widening multiply come from `vault-common`. The `tests/conformance.rs` file
+binds this crate's fixture to `vault-testkit`, which runs the same 18 properties
+against every adapter.
 
 This crate owns only what is XOXNO's: the `lending/` mirror of
 `xoxno-contract-sdk` (see below), the account-id sentinel, the index maths

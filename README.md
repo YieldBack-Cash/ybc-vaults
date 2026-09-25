@@ -6,8 +6,8 @@ one crate.
 
 | Crate | Kind | What it is |
 |---|---|---|
-| `crates/vault-common` | rlib | The share token (OpenZeppelin `Base`), operator-allowance rule, amount guard, widening `mul_div_floor`, TTL policy, `Deposit`/`Redeem`/`Sweep` events, `sweep`, shared error codes. **No rate math.** |
-| `crates/vault-testkit` | rlib, test-only | The conformance suite every adapter runs: 22 properties drawn from the YBC threat model. |
+| `crates/vault-common` | rlib | The share token (OpenZeppelin `Base`), operator-allowance rule, amount guard, widening `mul_div_floor`, TTL policy, `Deposit`/`Redeem` events, shared error codes. **No rate math.** |
+| `crates/vault-testkit` | rlib, test-only | The conformance suite every adapter runs: 18 properties drawn from the YBC threat model. |
 | `crates/xoxno-vault` | contract | XOXNO lending adapter. Shares mirror XOXNO's scaled unit; the rate is the market's supply index. |
 | `crates/blend-vault` | contract | Blend pool adapter. Shares are a ratio over the vault's bToken position so harvested BLND emissions accrue to holders; the rate is that ratio through the pool's `b_rate`. |
 | `wasm/blend/` | binaries | The Blend protocol, vendored from `blend-contract-sdk` 2.25.0 for the pool client and the test fixture. See its `MANIFEST.md`. |
@@ -46,7 +46,7 @@ and compares WASM hashes, and toolchain drift changes the hash.
 
 Nothing in `ybc-contracts`, the indexer or the frontend changes: the indexer
 learns the protocol behind a vault from `get_protocol() -> Address`, the one
-informational view every adapter exposes beyond SEP-56 and `sweep`.
+informational view every adapter exposes beyond SEP-56.
 
 ## History
 

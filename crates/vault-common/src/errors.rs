@@ -28,9 +28,6 @@ pub enum VaultError {
 
     /// An amount at an entry point was zero or negative.
     AmountNotPositive = 20,
-
-    /// `sweep` was aimed at the underlying asset or at the vault's own share
-    /// token. Both are refused: either would let the admin take depositor
-    /// funds.
-    SweepForbidden = 40,
+    // 40 was `SweepForbidden`; `sweep` was removed (rewards are protocol
+    // yield, harvested by the adapter, never an admin rescue). Keep it retired.
 }

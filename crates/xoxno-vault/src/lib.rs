@@ -45,8 +45,8 @@
 //! # What is shared
 //!
 //! The share token, the operator-allowance rule, the positive-amount guard,
-//! `sweep`, the TTL policy, the `Deposit`/`Redeem`/`Sweep` events and the
-//! widening multiply all come from `vault_common`. This crate holds only what
+//! the TTL policy, the `Deposit`/`Redeem` events and the widening multiply all
+//! come from `vault_common`. This crate holds only what
 //! is XOXNO's: the `lending` mirror of `xoxno-contract-sdk`, the account
 //! sentinel, and the index maths.
 

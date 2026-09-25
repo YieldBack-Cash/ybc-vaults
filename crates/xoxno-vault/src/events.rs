@@ -1,4 +1,4 @@
-//! XOXNO-specific events. `Deposit`, `Redeem` and `Sweep` are the shared ones
+//! XOXNO-specific events. `Deposit` and `Redeem` are the shared ones
 //! in `vault_common::events`.
 
 use soroban_sdk::{contractevent, Env};
