@@ -20,7 +20,6 @@ pub struct VaultFixture<'a> {
     pub controller_address: Address,
     pub token: TokenClient<'a>,
     pub asset: Address,
-    pub admin: Address,
     pub user: Address,
     pub other: Address,
 }
@@ -35,11 +34,11 @@ impl<'a> VaultFixture<'a> {
         e.mock_all_auths_allowing_non_root_auth();
         e.cost_estimate().budget().reset_unlimited();
 
-        let admin = Address::generate(&e);
+        let issuer = Address::generate(&e);
         let user = Address::generate(&e);
         let other = Address::generate(&e);
 
-        let sac = e.register_stellar_asset_contract_v2(admin.clone());
+        let sac = e.register_stellar_asset_contract_v2(issuer.clone());
         let asset = sac.address();
 
         let controller_address = e.register(MockController, (asset.clone(), HUB_ID));
@@ -62,7 +61,6 @@ impl<'a> VaultFixture<'a> {
             controller_address,
             vault_address,
             asset,
-            admin,
             user,
             other,
             e,

@@ -40,6 +40,26 @@ pub fn mul_div_floor(e: &Env, x: i128, y: i128, denominator: i128) -> i128 {
     quotient as i128
 }
 
+/// `ceil(x * y / denominator)`, carrying the intermediate in 256 bits.
+///
+/// Same domain and panics as [`mul_div_floor`]. This is the rounding the
+/// SEP-56 "up" directions need: the assets `mint` charges and the shares
+/// `withdraw` burns, so that every rounding falls in the vault's favour.
+pub fn mul_div_ceil(e: &Env, x: i128, y: i128, denominator: i128) -> i128 {
+    let floor = mul_div_floor(e, x, y, denominator);
+    if x == 0 || y == 0 {
+        return 0;
+    }
+    // Exact iff floor * denominator == x * y; compare in 256 bits.
+    let product = U256::from_u128(e, x as u128).mul(&U256::from_u128(e, y as u128));
+    let back = U256::from_u128(e, floor as u128).mul(&U256::from_u128(e, denominator as u128));
+    if back < product {
+        floor + 1
+    } else {
+        floor
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -71,6 +91,18 @@ mod test {
         let e = Env::default();
         assert_eq!(mul_div_floor(&e, 0, RAY * 2, RAY), 0);
         assert_eq!(mul_div_floor(&e, RAY, 0, RAY), 0);
+    }
+
+    #[test]
+    fn ceil_is_floor_plus_one_unless_exact() {
+        let e = Env::default();
+        assert_eq!(mul_div_ceil(&e, 1, RAY * 2 - 1, RAY), 2);
+        assert_eq!(mul_div_ceil(&e, 1, RAY * 2, RAY), 2);
+        assert_eq!(mul_div_ceil(&e, 1_0000000, RAY, RAY), 1_0000000);
+        assert_eq!(mul_div_ceil(&e, 0, RAY, RAY), 0);
+        assert_eq!(mul_div_ceil(&e, 7, RAY, RAY * 3), 3); // 7/3 -> 3
+        let shares = 50_000_000_000_000i128;
+        assert_eq!(mul_div_ceil(&e, shares, RAY * 3 + 1, RAY), shares * 3 + 1);
     }
 
     #[test]

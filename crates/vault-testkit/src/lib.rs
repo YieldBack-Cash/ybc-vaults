@@ -1,7 +1,9 @@
 //! The conformance suite every vault adapter runs.
 //!
-//! Each property here is one YBC depends on and SEP-56 does not guarantee, or
-//! one drawn straight from a finding in `ybc-contracts/docs/THREAT_MODEL.md`.
+//! Each property here is a SEP-56 rule (rounding directions, previews that
+//! never overstate, limits, the two events), one YBC depends on that the
+//! standard does not guarantee, or one drawn straight from a finding in
+//! `ybc-contracts/docs/THREAT_MODEL.md`.
 //! The suite is generic over a [`ConformanceFixture`], so a new adapter gets
 //! all of it by implementing seven methods and invoking
 //! [`conformance_tests!`] once:
@@ -44,14 +46,32 @@ pub trait ConformanceFixture {
     fn write_down(&self, bps: i128) -> bool;
 }
 
-/// The SEP-56 subset YBC calls, plus `total_supply`.
+/// The full SEP-56 interface, as the standard declares it.
 #[contractclient(name = "VaultClient")]
 pub trait Sep56Vault {
-    fn query_asset(e: &Env) -> Address;
-    fn convert_to_assets(e: &Env, shares: i128) -> i128;
-    fn deposit(e: &Env, assets: i128, receiver: Address, from: Address, operator: Address) -> i128;
-    fn redeem(e: &Env, shares: i128, receiver: Address, owner: Address, operator: Address) -> i128;
     fn total_supply(e: &Env) -> i128;
+    fn query_asset(e: &Env) -> Address;
+    fn total_assets(e: &Env) -> i128;
+    fn convert_to_shares(e: &Env, assets: i128) -> i128;
+    fn convert_to_assets(e: &Env, shares: i128) -> i128;
+    fn max_deposit(e: &Env, receiver: Address) -> i128;
+    fn preview_deposit(e: &Env, assets: i128) -> i128;
+    fn deposit(e: &Env, assets: i128, receiver: Address, from: Address, operator: Address) -> i128;
+    fn max_mint(e: &Env, receiver: Address) -> i128;
+    fn preview_mint(e: &Env, shares: i128) -> i128;
+    fn mint(e: &Env, shares: i128, receiver: Address, from: Address, operator: Address) -> i128;
+    fn max_withdraw(e: &Env, owner: Address) -> i128;
+    fn preview_withdraw(e: &Env, assets: i128) -> i128;
+    fn withdraw(
+        e: &Env,
+        assets: i128,
+        receiver: Address,
+        owner: Address,
+        operator: Address,
+    ) -> i128;
+    fn max_redeem(e: &Env, owner: Address) -> i128;
+    fn preview_redeem(e: &Env, shares: i128) -> i128;
+    fn redeem(e: &Env, shares: i128, receiver: Address, owner: Address, operator: Address) -> i128;
 }
 
 pub const ONE: i128 = 1_0000000;
@@ -148,6 +168,24 @@ macro_rules! conformance_tests {
             approve_rejects_a_negative_amount,
             rate_is_non_decreasing_under_accrual,
             a_write_down_is_reported_honestly,
+            conversions_round_down_and_never_gain_on_a_round_trip,
+            preview_deposit_never_overstates_the_deposit,
+            preview_mint_never_understates_the_mint,
+            preview_withdraw_never_understates_the_withdraw,
+            preview_redeem_never_overstates_the_redeem,
+            mint_mints_exactly_the_shares_requested,
+            mint_rejects_zero_and_negative_amounts,
+            mint_then_withdraw_never_profits,
+            withdraw_pays_exactly_the_assets_requested,
+            withdraw_rejects_zero_and_negative_amounts,
+            withdraw_beyond_the_balance_fails_rather_than_clamping,
+            operator_without_an_allowance_cannot_withdraw,
+            operator_allowance_is_consumed_by_withdraw,
+            max_redeem_is_the_balance_and_max_withdraw_its_value,
+            max_mint_is_max_deposit_in_shares,
+            deposit_and_mint_publish_the_standard_deposit_event,
+            redeem_and_withdraw_publish_the_standard_withdraw_event,
+            outstanding_shares_are_never_worth_more_than_total_assets,
         );
     };
     (@each $fixture:expr; $($name:ident),* $(,)?) => {

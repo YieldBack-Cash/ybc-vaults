@@ -19,7 +19,7 @@
 //! `i128` tops out near 1.7e38.
 
 use soroban_sdk::Env;
-use vault_common::math::mul_div_floor;
+use vault_common::math::{mul_div_ceil, mul_div_floor};
 
 use crate::lending::constants::RAY;
 
@@ -50,13 +50,33 @@ pub fn shares_to_assets(e: &Env, shares: i128, index: i128) -> i128 {
 
 /// `shares = floor(assets * RAY / index)`.
 ///
-/// Previews and the mock controller only. The deposit path never computes a
+/// Views and the mock controller only. The deposit path never computes a
 /// share count this way: it measures the scaled delta XOXNO actually credited,
 /// because XOXNO's own rounding decides that figure and a guess which floors
 /// differently would break the invariant cumulatively rather than once.
-#[allow(dead_code)]
 pub fn assets_to_shares(e: &Env, assets: i128, index: i128) -> i128 {
     mul_div_floor(e, assets, RAY, index)
+}
+
+/// `shares = ceil(assets * RAY / index)`: what `withdraw` burns to pay exactly
+/// `assets`.
+///
+/// XOXNO burns `ceil(assets * 1e20 * RAY / index)` Ray units for the same
+/// withdrawal, and `ceil(x * 1e20) <= ceil(x) * 1e20`, so the position drops
+/// by at most what the vault burned. The invariant survives `withdraw` for the
+/// same reason it survives `redeem`.
+pub fn assets_to_shares_up(e: &Env, assets: i128, index: i128) -> i128 {
+    mul_div_ceil(e, assets, RAY, index)
+}
+
+/// `assets = ceil(shares * index / RAY)`: what `mint` charges to issue exactly
+/// `shares`.
+///
+/// Supplying that many assets makes XOXNO credit
+/// `floor(assets * 1e20 * RAY / index) >= shares * 1e20` Ray units, so at least
+/// `shares` at share precision; the excess stays unminted in the position.
+pub fn shares_to_assets_up(e: &Env, shares: i128, index: i128) -> i128 {
+    mul_div_ceil(e, shares, index, RAY)
 }
 
 #[cfg(test)]
@@ -130,6 +150,76 @@ mod test {
                 back_ceil <= shares,
                 "shares={shares} assets={assets} back_ceil={back_ceil}"
             );
+        }
+    }
+}
+
+/// The `mint` and `withdraw` rounding arguments, checked against a model of
+/// the controller's own Ray-precision rounding (`floor` on supply, `ceil` on
+/// withdraw), over random indexes and amounts.
+#[cfg(test)]
+mod proptests {
+    use super::*;
+    use proptest::prelude::*;
+    use vault_common::math::mul_div_ceil;
+
+    // 1 billion tokens at 7 decimals: keeps the model's `amount * SCALED_UNIT`
+    // (an i128 stand-in for the controller's wider Ray arithmetic) in range.
+    const MAX_AMOUNT: i128 = 10_000_000_000_000_000;
+    // 1.0 to 10.0: an index starts at RAY and only bad debt takes it below.
+    const MIN_INDEX: i128 = RAY;
+    const MAX_INDEX: i128 = 10 * RAY;
+
+    /// Ray units XOXNO credits for a supply of `assets`.
+    fn controller_credits(e: &Env, assets: i128, index: i128) -> i128 {
+        mul_div_floor(e, assets * SCALED_UNIT, RAY, index)
+    }
+
+    /// Ray units XOXNO burns for a withdrawal of `assets`.
+    fn controller_burns(e: &Env, assets: i128, index: i128) -> i128 {
+        mul_div_ceil(e, assets * SCALED_UNIT, RAY, index)
+    }
+
+    proptest! {
+        /// Supplying `preview_mint(shares)` always credits at least `shares`.
+        #[test]
+        fn mint_rounding_always_covers_the_shares(
+            shares in 1i128..=MAX_AMOUNT,
+            index in MIN_INDEX..=MAX_INDEX,
+        ) {
+            let e = Env::default();
+            let assets = shares_to_assets_up(&e, shares, index);
+            let credited = ray_scaled_to_shares(controller_credits(&e, assets, index));
+            prop_assert!(credited >= shares, "assets={assets} credited={credited}");
+        }
+
+        /// Burning `preview_withdraw(assets)` shares always covers what XOXNO
+        /// burns from the position, so `total_supply * SCALED_UNIT <= position`
+        /// survives every withdrawal.
+        #[test]
+        fn withdraw_rounding_always_covers_the_position_drop(
+            assets in 1i128..=MAX_AMOUNT,
+            index in MIN_INDEX..=MAX_INDEX,
+        ) {
+            let e = Env::default();
+            let shares = assets_to_shares_up(&e, assets, index);
+            let dropped = controller_burns(&e, assets, index);
+            prop_assert!(shares * SCALED_UNIT >= dropped, "shares={shares} dropped={dropped}");
+        }
+
+        /// The up and down variants bracket the exact value and differ by at most 1.
+        #[test]
+        fn rounding_up_within_one_of_down(
+            amount in 0i128..=MAX_AMOUNT,
+            index in MIN_INDEX..=MAX_INDEX,
+        ) {
+            let e = Env::default();
+            let a_down = shares_to_assets(&e, amount, index);
+            let a_up = shares_to_assets_up(&e, amount, index);
+            prop_assert!(a_down <= a_up && a_up - a_down <= 1);
+            let s_down = assets_to_shares(&e, amount, index);
+            let s_up = assets_to_shares_up(&e, amount, index);
+            prop_assert!(s_down <= s_up && s_up - s_down <= 1);
         }
     }
 }

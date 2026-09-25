@@ -16,8 +16,8 @@
 //! * a widening `mul_div_floor` on `U256` ([`math`]): the SDK's `i128` overflows
 //!   on ordinary balances once an index or rate is in the multiplier;
 //! * instance TTL policy ([`ttl`]);
-//! * the `Deposit` / `Redeem` events, with the holder as a topic so an
-//!   indexer can attribute by look-through ([`events`]);
+//! * the two SEP-56 events, `Deposit` and `Withdraw`, exactly as the standard
+//!   defines them ([`events`]);
 //! * the shared error codes and the numbering rule that keeps adapters and
 //!   OpenZeppelin from colliding ([`errors`]).
 

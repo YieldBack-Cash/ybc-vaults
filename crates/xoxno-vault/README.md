@@ -41,20 +41,35 @@ the relation is `<=` and not `=`.
 
 ## Surface
 
-Four functions are what YBC actually calls:
+The full SEP-56 interface, exactly as the standard declares it:
 
 ```rust
-query_asset() -> Address
-convert_to_assets(shares: i128) -> i128
-deposit(assets: i128, receiver: Address, from: Address, operator: Address) -> i128
-redeem(shares: i128, receiver: Address, owner: Address, operator: Address) -> i128
+total_supply() -> i128                         query_asset() -> Address
+total_assets() -> i128
+convert_to_shares(assets) -> i128              convert_to_assets(shares) -> i128
+max_deposit(receiver) -> i128                  preview_deposit(assets) -> i128
+deposit(assets, receiver, from, operator) -> shares
+max_mint(receiver) -> i128                     preview_mint(shares) -> i128
+mint(shares, receiver, from, operator) -> assets
+max_withdraw(owner) -> i128                    preview_withdraw(assets) -> i128
+withdraw(assets, receiver, owner, operator) -> shares
+max_redeem(owner) -> i128                      preview_redeem(shares) -> i128
+redeem(shares, receiver, owner, operator) -> assets
 ```
 
-Plus the full SEP-41 token surface on the same address (consumers custody these
-shares and hold them as an AMM reserve), and three extras: `total_assets`,
-`max_deposit`, `max_withdraw`, and `get_protocol() -> Address` (the XOXNO
-controller): informational, read by the YBC indexer so a curator can confirm
-the protocol behind a vault. Not part of SEP-56; nothing on chain calls it.
+with the standard's `Deposit` and `Withdraw` events, and the full SEP-41 token
+surface on the same address. YBC itself calls only `query_asset`,
+`convert_to_assets`, `deposit` and `redeem`. There are no fees, so every
+`preview_*` equals the matching conversion with the standard's rounding:
+`deposit` and `redeem` round down, `mint` and `withdraw` round up, and every
+rounding falls in the vault's favour (`tests/conformance.rs`).
+
+Beyond the standard: `get_protocol() -> Address` (the XOXNO controller),
+informational, read by the YBC indexer so a curator can confirm the protocol
+behind a vault; nothing on chain calls it. `mint` and `withdraw` keep the
+crate invariant for the same reason `deposit` and `redeem` do: rounding the
+caller's side up at share precision always covers the controller's own
+rounding at Ray precision (`vault.rs` proptests).
 
 There is no privileged function and no admin. XOXNO has no on-chain rewards to
 harvest (see "There is no harvest" below), and a token that lands on the vault
@@ -99,7 +114,7 @@ script.
 The share token (OpenZeppelin `Base`), the operator-allowance rule on `redeem`,
 the positive-amount guard, the TTL policy, the `Deposit`/`Redeem` events and
 the widening multiply come from `vault-common`. The `tests/conformance.rs` file
-binds this crate's fixture to `vault-testkit`, which runs the same 18 properties
+binds this crate's fixture to `vault-testkit`, which runs the same 37 properties
 against every adapter.
 
 This crate owns only what is XOXNO's: the `lending/` mirror of

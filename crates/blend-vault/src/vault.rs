@@ -8,7 +8,7 @@
 use crate::{constants::SCALAR_12, errors::BlendVaultError, pool, storage};
 use soroban_sdk::{contracttype, panic_with_error, Address, Env};
 use stellar_tokens::fungible::Base;
-use vault_common::math::mul_div_floor;
+use vault_common::math::{mul_div_ceil, mul_div_floor};
 
 #[derive(Clone)]
 #[cfg_attr(test, derive(Debug))]
@@ -22,16 +22,6 @@ pub struct VaultData {
     pub total_shares: i128,
     /// The total bToken deposits owned by the vault depositors.
     pub total_b_tokens: i128,
-}
-
-/// `ceil(x * y / denominator)` for non-negative operands.
-fn mul_div_ceil(e: &Env, x: i128, y: i128, denominator: i128) -> i128 {
-    let floor = mul_div_floor(e, x, y, denominator);
-    if x != 0 && y != 0 && mul_div_floor(e, floor, denominator, y) < x {
-        floor + 1
-    } else {
-        floor
-    }
 }
 
 impl VaultData {
@@ -61,9 +51,22 @@ impl VaultData {
         mul_div_floor(e, amount, self.total_b_tokens, self.total_shares)
     }
 
+    /// Converts a share amount to a b_token amount rounding up
+    pub fn shares_to_b_tokens_up(&self, e: &Env, amount: i128) -> i128 {
+        if self.total_shares == 0 {
+            return amount;
+        }
+        mul_div_ceil(e, amount, self.total_b_tokens, self.total_shares)
+    }
+
     /// Converts a b_token amount to an underlying token amount rounding down
     pub fn b_tokens_to_underlying_down(&self, e: &Env, amount: i128) -> i128 {
         mul_div_floor(e, amount, self.b_rate, SCALAR_12)
+    }
+
+    /// Converts a b_token amount to an underlying token amount rounding up
+    pub fn b_tokens_to_underlying_up(&self, e: &Env, amount: i128) -> i128 {
+        mul_div_ceil(e, amount, self.b_rate, SCALAR_12)
     }
 
     /// Converts an underlying amount to a b_token amount rounding down
@@ -120,6 +123,85 @@ pub fn deposit(
     storage::set_vault_data(e, &vault);
     Base::mint(e, user, share_amount);
     (b_tokens_amount, share_amount)
+}
+
+/// Mint an exact share amount. The caller has already supplied `assets` (the
+/// figure `preview_mint` quoted, rounded up) to the pool; this credits the
+/// bTokens the pool minted for them and issues exactly `shares`.
+///
+/// Rounding the asset side up means the pool credits at least the bTokens
+/// `shares` are worth; any excess stays in `total_b_tokens` unminted, in every
+/// holder's favour. If it ever credited less, the vault would be issuing shares
+/// it does not hold, so that case reverts.
+///
+/// ### Returns
+/// * `i128` - The amount of b_tokens credited to the vault
+pub fn mint(
+    e: &Env,
+    pool: &Address,
+    asset: &Address,
+    user: &Address,
+    shares: i128,
+    assets: i128,
+) -> i128 {
+    let mut vault = get_vault_updated(e, pool, asset);
+
+    let b_tokens_amount = vault.underlying_to_b_tokens_down(e, assets);
+    if b_tokens_amount <= 0 {
+        panic_with_error!(e, BlendVaultError::InvalidBTokensMinted);
+    }
+    if vault.b_tokens_to_shares_down(e, b_tokens_amount) < shares {
+        panic_with_error!(e, BlendVaultError::InvalidSharesMinted);
+    }
+
+    vault.total_shares += shares;
+    vault.total_b_tokens += b_tokens_amount;
+    storage::set_vault_data(e, &vault);
+    Base::mint(e, user, shares);
+    b_tokens_amount
+}
+
+/// Withdraw an exact underlying amount, burning the shares it costs (rounded
+/// up). Does not perform the call to the pool to withdraw the tokens.
+///
+/// ### Returns
+/// * `(i128, i128)` - (The amount of b_tokens burned from the vault, the shares burned)
+///
+/// ### Panics
+/// * If the amount rounds to zero bTokens or zero shares
+/// * If the user holds fewer than the shares it costs
+pub fn withdraw(
+    e: &Env,
+    pool: &Address,
+    asset: &Address,
+    user: &Address,
+    assets: i128,
+) -> (i128, i128) {
+    let mut vault = get_vault_updated(e, pool, asset);
+
+    // The blend pool rounds the b_tokens it burns UP from the underlying
+    // amount requested; the shares that cost round up again on top.
+    let b_tokens_amount = vault.underlying_to_b_tokens_up(e, assets);
+    if b_tokens_amount <= 0 {
+        panic_with_error!(e, BlendVaultError::InvalidBTokensBurnt);
+    }
+    let shares = vault.b_tokens_to_shares_up(e, b_tokens_amount);
+    if shares <= 0 {
+        panic_with_error!(e, BlendVaultError::InvalidSharesBurnt);
+    }
+
+    // Burns exactly `shares`; panics with OZ `InsufficientBalance` if short.
+    Base::update(e, Some(user), None, shares);
+
+    if vault.total_shares < shares || vault.total_b_tokens < b_tokens_amount {
+        panic_with_error!(e, BlendVaultError::InsufficientReserves);
+    }
+
+    vault.total_shares -= shares;
+    vault.total_b_tokens -= b_tokens_amount;
+    storage::set_vault_data(e, &vault);
+
+    (b_tokens_amount, shares)
 }
 
 /// Redeem an exact share amount from the vault. Does not perform the call to the
@@ -211,9 +293,40 @@ mod proptests {
             vault.b_tokens_to_shares_down(&e, amount);
             vault.b_tokens_to_shares_up(&e, amount);
             vault.shares_to_b_tokens_down(&e, amount);
+            vault.shares_to_b_tokens_up(&e, amount);
             vault.b_tokens_to_underlying_down(&e, amount);
+            vault.b_tokens_to_underlying_up(&e, amount);
             vault.underlying_to_b_tokens_down(&e, amount);
             vault.underlying_to_b_tokens_up(&e, amount);
+        }
+
+        /// The `mint` argument: supplying `preview_mint(shares)` (both legs
+        /// rounded up) makes the pool credit enough bTokens (rounded down, as
+        /// the pool does) to be worth at least `shares` at the vault's ratio.
+        #[test]
+        fn mint_rounding_always_covers_the_shares(vault in vault_state(), shares in 1i128..=MAX_TOKENS) {
+            let e = Env::default();
+            let b_needed = vault.shares_to_b_tokens_up(&e, shares);
+            let assets = vault.b_tokens_to_underlying_up(&e, b_needed);
+            let b_credited = vault.underlying_to_b_tokens_down(&e, assets);
+            prop_assert!(b_credited >= b_needed);
+            prop_assert!(vault.b_tokens_to_shares_down(&e, b_credited) >= shares);
+        }
+
+        /// The `withdraw` argument: the shares burned for an exact underlying
+        /// amount (both legs rounded up) are worth at least the bTokens the
+        /// pool burns, so the ratio left for the other holders never worsens.
+        #[test]
+        fn withdraw_rounding_never_worsens_the_ratio(vault in vault_state(), assets in 1i128..=MAX_TOKENS) {
+            let e = Env::default();
+            let b_burned = vault.underlying_to_b_tokens_up(&e, assets);
+            let shares = vault.b_tokens_to_shares_up(&e, b_burned);
+            // shares / total_shares >= b_burned / total_b_tokens
+            if vault.total_shares > 0 {
+                prop_assert!(shares * vault.total_b_tokens >= b_burned * vault.total_shares);
+            } else {
+                prop_assert_eq!(shares, b_burned);
+            }
         }
 
         /// Minting shares from bTokens and converting back never gains bTokens.

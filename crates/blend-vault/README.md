@@ -20,21 +20,34 @@ both round down.
 
 ## Surface
 
-Four functions are what YBC actually calls:
+The full SEP-56 interface, exactly as the standard declares it:
 
 ```rust
-query_asset() -> Address
-convert_to_assets(shares: i128) -> i128
-deposit(assets: i128, receiver: Address, from: Address, operator: Address) -> i128
-redeem(shares: i128, receiver: Address, owner: Address, operator: Address) -> i128
+total_supply() -> i128                         query_asset() -> Address
+total_assets() -> i128
+convert_to_shares(assets) -> i128              convert_to_assets(shares) -> i128
+max_deposit(receiver) -> i128                  preview_deposit(assets) -> i128
+deposit(assets, receiver, from, operator) -> shares
+max_mint(receiver) -> i128                     preview_mint(shares) -> i128
+mint(shares, receiver, from, operator) -> assets
+max_withdraw(owner) -> i128                    preview_withdraw(assets) -> i128
+withdraw(assets, receiver, owner, operator) -> shares
+max_redeem(owner) -> i128                      preview_redeem(shares) -> i128
+redeem(shares, receiver, owner, operator) -> assets
 ```
 
-Plus the full SEP-41 token surface on the same address, `total_assets`,
-`max_deposit`, `max_withdraw`, and `get_protocol() -> Address` (the Blend
-pool). `get_protocol` is the one view beyond SEP-56 that every adapter in this
-workspace exposes; it is informational, read by the YBC indexer so a curator
-can confirm the protocol behind a vault, and nothing on chain calls it.
-Blend-specific views are `get_vault` (the ratio state) and `get_b_tokens`.
+with the standard's `Deposit` and `Withdraw` events, and the full SEP-41 token
+surface on the same address. YBC itself calls only `query_asset`,
+`convert_to_assets`, `deposit` and `redeem`. There are no fees, so every
+`preview_*` equals the matching conversion with the standard's rounding:
+`deposit` and `redeem` round down, `mint` and `withdraw` round up, and every
+rounding falls in the vault's favour (`tests/conformance.rs`).
+
+Beyond the standard: `get_protocol() -> Address` (the Blend pool), the one
+view every adapter in this workspace exposes; it is informational, read by the
+YBC indexer so a curator can confirm the protocol behind a vault, and nothing
+on chain calls it. Blend-specific views are `get_vault` (the ratio state) and
+`get_b_tokens`.
 
 Operations: `set_admin`, `set_router` (admin) and `claim_emissions` (anyone;
 the caller sets the swap's slippage floor). Rewards are protocol yield:
@@ -46,7 +59,7 @@ there is no admin token-rescue function and nothing an admin can move.
 The share token (OpenZeppelin `Base`), the operator-allowance rule on `redeem`,
 the positive-amount guard, the TTL policy, the `Deposit`/`Redeem` events and
 the widening multiply come from `vault-common`. `tests/conformance.rs` binds
-this crate's fixture to `vault-testkit`, which runs the same 18 properties
+this crate's fixture to `vault-testkit`, which runs the same 37 properties
 against every adapter, here on a real Blend pool.
 
 This crate owns the pool client (`pool.rs`, generated from the vendored

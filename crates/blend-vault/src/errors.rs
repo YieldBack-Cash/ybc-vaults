@@ -20,6 +20,8 @@ pub enum BlendVaultError {
     InvalidBTokensBurnt = 202,
     /// A deposit too small to mint a single share at the current ratio.
     InvalidSharesMinted = 203,
+    /// A withdrawal too small to cost a single share at the current ratio.
+    InvalidSharesBurnt = 204,
     /// `claim_emissions` was called before `set_router`.
     SwapNotConfigured = 205,
 }

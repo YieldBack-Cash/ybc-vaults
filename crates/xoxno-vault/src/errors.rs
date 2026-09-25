@@ -18,4 +18,9 @@ pub enum XoxnoError {
     /// The underlying asset's `decimals()` is not 7. Shares are fixed at 7
     /// decimals and the Ray-to-share conversion is derived from it.
     UnsupportedDecimals = 302,
+
+    /// `mint` supplied the assets `preview_mint` quoted and XOXNO credited
+    /// fewer scaled units than the shares requested. Cannot happen with the
+    /// controller's floor rounding; refused rather than papered over.
+    MintShortfall = 303,
 }

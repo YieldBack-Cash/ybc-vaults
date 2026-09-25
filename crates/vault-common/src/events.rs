@@ -1,20 +1,28 @@
-//! Events every adapter emits.
+//! The two SEP-56 events, exactly as the standard defines them: the same
+//! struct names, the same fields in the same order, `operator`, `from`,
+//! `receiver` and `owner` as topics, and the default topic name (the struct
+//! name in snake case), so an indexer written against the standard sees these
+//! vaults without special cases.
 //!
-//! `receiver`/`owner` are marked `#[topic]`, not left in the data section. An
-//! off-chain indexer attributing an incentive program by look-through needs to
-//! filter on who ended up holding the shares, and a data-only field cannot be
-//! filtered. `blend-vault-v2` topicked only the funds-owner, which made exactly
-//! that query impossible against it.
+//! `mint` publishes `Deposit` and `withdraw` publishes `Withdraw`, as the
+//! standard says: the event describes the flow of assets and shares, not the
+//! entry point that caused it.
 //!
 //! Adapters add their own protocol-specific events beside these.
 
 use soroban_sdk::{contractevent, Address, Env};
 
-#[contractevent(topics = ["vault", "deposit"])]
+/// Assets went in, shares came out.
+#[contractevent]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Deposit {
+    /// The address that initiated the deposit transaction.
+    #[topic]
+    pub operator: Address,
+    /// The address that provided the underlying assets.
     #[topic]
     pub from: Address,
+    /// The address that received the vault shares.
     #[topic]
     pub receiver: Address,
     /// Measured, not requested: what the vault actually received.
@@ -22,19 +30,33 @@ pub struct Deposit {
     pub shares: i128,
 }
 
-#[contractevent(topics = ["vault", "redeem"])]
+/// Shares were burned, assets went out.
+#[contractevent]
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Redeem {
+pub struct Withdraw {
+    /// The address that initiated the withdrawal transaction.
     #[topic]
-    pub owner: Address,
+    pub operator: Address,
+    /// The address that received the underlying assets.
     #[topic]
     pub receiver: Address,
-    pub shares: i128,
+    /// The address whose vault shares were burned.
+    #[topic]
+    pub owner: Address,
     pub assets: i128,
+    pub shares: i128,
 }
 
-pub fn deposit(e: &Env, from: &Address, receiver: &Address, assets: i128, shares: i128) {
+pub fn deposit(
+    e: &Env,
+    operator: &Address,
+    from: &Address,
+    receiver: &Address,
+    assets: i128,
+    shares: i128,
+) {
     Deposit {
+        operator: operator.clone(),
         from: from.clone(),
         receiver: receiver.clone(),
         assets,
@@ -43,12 +65,20 @@ pub fn deposit(e: &Env, from: &Address, receiver: &Address, assets: i128, shares
     .publish(e);
 }
 
-pub fn redeem(e: &Env, owner: &Address, receiver: &Address, shares: i128, assets: i128) {
-    Redeem {
-        owner: owner.clone(),
+pub fn withdraw(
+    e: &Env,
+    operator: &Address,
+    receiver: &Address,
+    owner: &Address,
+    assets: i128,
+    shares: i128,
+) {
+    Withdraw {
+        operator: operator.clone(),
         receiver: receiver.clone(),
-        shares,
+        owner: owner.clone(),
         assets,
+        shares,
     }
     .publish(e);
 }
