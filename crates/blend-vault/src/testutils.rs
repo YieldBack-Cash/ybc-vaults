@@ -1,23 +1,23 @@
-//! Test support: a real Blend deployment from the vendored binaries, a mock
-//! pool for unit tests, and the fixture the shared conformance suite runs on.
+//! Test support for the Blend adapter.
 //!
-//! `BlendFixture` is a reimplementation of the one in `blend-contract-sdk`'s
-//! `testutils` (which cannot be linked on soroban-sdk 26) against the same
-//! WASMs, imported in `crate::blend`.
+//! The Blend protocol itself (deployer, pools, oracle, ledger movement) lives
+//! in `vault_testkit::protocols::blend` and is re-exported here; this module
+//! adds only what is this crate's: registering the vault, the fixture the
+//! shared conformance suite runs on, and two mocks for unit tests (a pool that
+//! is nothing but a settable `b_rate`, and a 1:1 swap router).
 
-use crate::blend::{
-    backstop, comet, emitter,
-    pool::{Client as PoolClient, Request, ReserveConfig, ReserveEmissionMetadata},
-    pool_factory,
-};
 use crate::constants::SCALAR_7;
-use crate::storage::ONE_DAY_LEDGERS;
 use crate::BlendVault;
 use soroban_sdk::{
-    testutils::{Address as _, BytesN as _, Ledger as _, LedgerInfo},
+    testutils::Address as _,
     token::{StellarAssetClient, TokenClient},
-    vec, Address, BytesN, Env, String, Vec,
+    vec, Address, Env, String,
 };
+
+pub use vault_testkit::ledger::{EnvTestUtils, ONE_DAY_LEDGERS};
+pub use vault_testkit::protocols::blend::{setup_pool_util_rate, BlendFixture};
+
+use vault_testkit::protocols::blend::{self as blend_protocol, pool::Client as PoolClient, pool::Request};
 
 // ── arithmetic ──────────────────────────────────────────────────────────────
 
@@ -58,8 +58,7 @@ pub fn assert_approx_eq_rel(a: i128, b: i128, percentage: i128) {
 
 // ── tokens ──────────────────────────────────────────────────────────────────
 
-/// Mint-and-balance handle on a Stellar asset contract, so tests read the
-/// same as they did against `sep_41_token`'s mock.
+/// Mint-and-balance handle on a Stellar asset contract.
 pub struct MockTokenClient<'a> {
     pub address: Address,
     sac: StellarAssetClient<'a>,
@@ -130,106 +129,8 @@ pub fn create_test_blend_vault(
 
 // ── Blend protocol ──────────────────────────────────────────────────────────
 
-/// Fixture for deploying and interacting with the Blend Protocol contracts in
-/// tests. A port of `blend_contract_sdk::testutils::BlendFixture` onto the
-/// vendored binaries.
-pub struct BlendFixture<'a> {
-    pub backstop: backstop::Client<'a>,
-    pub emitter: emitter::Client<'a>,
-    pub backstop_token: comet::Client<'a>,
-    pub pool_factory: pool_factory::Client<'a>,
-}
-
-impl<'a> BlendFixture<'a> {
-    /// Deploy a new set of Blend Protocol contracts. Mints 200k backstop
-    /// tokens to the deployer that can be used in the future to create up to 4
-    /// reward zone pools (50k tokens each).
-    ///
-    /// This function also resets the env budget via `reset_unlimited`.
-    pub fn deploy(
-        env: &Env,
-        deployer: &Address,
-        blnd: &Address,
-        usdc: &Address,
-    ) -> BlendFixture<'a> {
-        env.cost_estimate().budget().reset_unlimited();
-        let emitter = env.register(emitter::WASM, ());
-        let backstop = Address::generate(env);
-        let pool_factory = Address::generate(env);
-        let comet = env.register(comet::WASM, ());
-        let blnd_client = StellarAssetClient::new(env, blnd);
-        let usdc_client = StellarAssetClient::new(env, usdc);
-        blnd_client
-            .mock_all_auths()
-            .mint(deployer, &(1_000_0000000 * 2001));
-        usdc_client
-            .mock_all_auths()
-            .mint(deployer, &(25_0000000 * 2001));
-
-        let comet_client: comet::Client<'a> = comet::Client::new(env, &comet);
-        comet_client.mock_all_auths().init(
-            deployer,
-            &vec![env, blnd.clone(), usdc.clone()],
-            &vec![env, 0_8000000, 0_2000000],
-            &vec![env, 1_000_0000000, 25_0000000],
-            &0_0030000,
-        );
-
-        comet_client.mock_all_auths().join_pool(
-            &199_900_0000000, // finalize mints 100
-            &vec![env, 1_000_0000000 * 2000, 25_0000000 * 2000],
-            deployer,
-        );
-
-        blnd_client.mock_all_auths().set_admin(&emitter);
-        let emitter_client: emitter::Client<'a> = emitter::Client::new(env, &emitter);
-        emitter_client
-            .mock_all_auths()
-            .initialize(blnd, &backstop, &comet);
-
-        env.register_at(
-            &backstop,
-            backstop::WASM,
-            (
-                comet,
-                emitter,
-                blnd,
-                usdc,
-                pool_factory.clone(),
-                Vec::<(Address, i128)>::new(env),
-            ),
-        );
-        let backstop_client: backstop::Client<'a> = backstop::Client::new(env, &backstop);
-
-        let pool_hash = env
-            .deployer()
-            .upload_contract_wasm(crate::blend::pool::WASM);
-
-        env.register_at(
-            &pool_factory,
-            pool_factory::WASM,
-            (pool_factory::PoolInitMeta {
-                backstop,
-                blnd_id: blnd.clone(),
-                pool_hash,
-            },),
-        );
-        let pool_factory_client = pool_factory::Client::new(env, &pool_factory);
-
-        env.cost_estimate().budget().reset_default();
-
-        BlendFixture {
-            backstop: backstop_client,
-            emitter: emitter_client,
-            backstop_token: comet_client,
-            pool_factory: pool_factory_client,
-        }
-    }
-}
-
-/// Deploys a pool with usdc (reserve 0) and xlm (reserve 1) at a fixed 10%
-/// borrow rate and 0% backstop take rate, starts emissions to every reserve
-/// token evenly, and advances a week so the first emission cycle has run.
+/// `vault_testkit::protocols::blend::create_blend_pool`, taking this crate's
+/// token handles.
 pub fn create_blend_pool(
     e: &Env,
     blend_fixture: &BlendFixture,
@@ -237,120 +138,7 @@ pub fn create_blend_pool(
     usdc: &MockTokenClient,
     xlm: &MockTokenClient,
 ) -> Address {
-    usdc.mint(admin, &200_000_0000000);
-    xlm.mint(admin, &200_000_0000000);
-
-    // $1.00 usdc, $0.01 xlm
-    let (oracle, oracle_client) = create_mock_oracle(e);
-    oracle_client.set_price(&usdc.address, &1_000_0000);
-    oracle_client.set_price(&xlm.address, &100_0000);
-
-    let salt = BytesN::<32>::random(e);
-    let pool = blend_fixture.pool_factory.deploy(
-        admin,
-        &String::from_str(e, "TEST"),
-        &salt,
-        &oracle,
-        &0,
-        &4,
-        &1_0000000,
-    );
-    let pool_client = PoolClient::new(e, &pool);
-    blend_fixture
-        .backstop
-        .deposit(admin, &pool, &50_000_0000000);
-    let reserve_config = ReserveConfig {
-        c_factor: 900_0000,
-        decimals: 7,
-        index: 0,
-        l_factor: 900_0000,
-        max_util: 900_0000,
-        reactivity: 0,
-        r_base: 100_0000,
-        r_one: 0,
-        r_two: 0,
-        r_three: 0,
-        util: 0,
-        supply_cap: i64::MAX as i128,
-        enabled: true,
-    };
-    pool_client.queue_set_reserve(&usdc.address, &reserve_config);
-    pool_client.set_reserve(&usdc.address);
-    pool_client.queue_set_reserve(&xlm.address, &reserve_config);
-    pool_client.set_reserve(&xlm.address);
-    let emission_config = vec![
-        e,
-        ReserveEmissionMetadata {
-            res_index: 0,
-            res_type: 0,
-            share: 250_0000,
-        },
-        ReserveEmissionMetadata {
-            res_index: 0,
-            res_type: 1,
-            share: 250_0000,
-        },
-        ReserveEmissionMetadata {
-            res_index: 1,
-            res_type: 0,
-            share: 250_0000,
-        },
-        ReserveEmissionMetadata {
-            res_index: 1,
-            res_type: 1,
-            share: 250_0000,
-        },
-    ];
-    pool_client.set_emissions_config(&emission_config);
-    pool_client.set_status(&0);
-    blend_fixture.backstop.add_reward(&pool, &None);
-
-    // wait a week and start emissions
-    e.jump(ONE_DAY_LEDGERS * 7);
-    blend_fixture.emitter.distribute();
-    blend_fixture.backstop.distribute();
-    pool
-}
-
-/// Supplies 200k usdc and 200k xlm to `pool` as `admin`, then borrows
-/// `usdc_borrow` usdc and 100k xlm against it to establish the pool's
-/// utilization rate (~50% with 100k usdc borrowed).
-pub fn setup_pool_util_rate(
-    e: &Env,
-    pool: &Address,
-    admin: &Address,
-    usdc: &Address,
-    xlm: &Address,
-    usdc_borrow: i128,
-) {
-    PoolClient::new(e, pool).mock_all_auths().submit(
-        admin,
-        admin,
-        admin,
-        &vec![
-            e,
-            Request {
-                address: usdc.clone(),
-                amount: 200_000_0000000,
-                request_type: 2,
-            },
-            Request {
-                address: usdc.clone(),
-                amount: usdc_borrow,
-                request_type: 4,
-            },
-            Request {
-                address: xlm.clone(),
-                amount: 200_000_0000000,
-                request_type: 2,
-            },
-            Request {
-                address: xlm.clone(),
-                amount: 100_000_0000000,
-                request_type: 4,
-            },
-        ],
-    );
+    blend_protocol::create_blend_pool(e, blend_fixture, admin, &usdc.address, &xlm.address)
 }
 
 /// Everything `create_funded_blend_vault` stands up.
@@ -369,7 +157,6 @@ pub struct FundedBlendVault {
 ///
 /// Mocks all auths and advances the ledger by a day to accrue interest.
 pub fn create_funded_blend_vault_full(e: &Env) -> FundedBlendVault {
-    e.cost_estimate().budget().reset_unlimited();
     e.mock_all_auths();
     e.set_default_info();
 
@@ -383,11 +170,9 @@ pub fn create_funded_blend_vault_full(e: &Env) -> FundedBlendVault {
     let xlm = e
         .register_stellar_asset_contract_v2(bombadil.clone())
         .address();
-    let usdc_client = MockTokenClient::new(e, &usdc);
-    let xlm_client = MockTokenClient::new(e, &xlm);
 
     let blend_fixture = BlendFixture::deploy(e, &bombadil, &blnd, &usdc);
-    let pool = create_blend_pool(e, &blend_fixture, &bombadil, &usdc_client, &xlm_client);
+    let pool = blend_protocol::create_blend_pool(e, &blend_fixture, &bombadil, &usdc, &xlm);
     let vault = register_blend_vault(e, &bombadil, &pool, &usdc, &blnd);
 
     setup_pool_util_rate(e, &pool, &bombadil, &usdc, &xlm, 100_000_0000000);
@@ -406,142 +191,6 @@ pub fn create_funded_blend_vault_full(e: &Env) -> FundedBlendVault {
 pub fn create_funded_blend_vault(e: &Env) -> (Address, Address) {
     let f = create_funded_blend_vault_full(e);
     (f.vault, f.usdc)
-}
-
-// ── ledger ──────────────────────────────────────────────────────────────────
-
-pub trait EnvTestUtils {
-    /// Jump the env by the given amount of ledgers. Assumes 5 seconds per ledger.
-    fn jump(&self, ledgers: u32);
-
-    /// Jump the env by the given amount of seconds. Increments the sequence by 1.
-    fn jump_time(&self, seconds: u64);
-
-    /// Set the ledger to the default LedgerInfo
-    ///
-    /// Time -> 1441065600 (Sept 1st, 2015 12:00:00 AM UTC)
-    /// Sequence -> 100
-    fn set_default_info(&self);
-}
-
-impl EnvTestUtils for Env {
-    fn jump(&self, ledgers: u32) {
-        self.ledger().set(LedgerInfo {
-            timestamp: self.ledger().timestamp().saturating_add(ledgers as u64 * 5),
-            protocol_version: 26,
-            sequence_number: self.ledger().sequence().saturating_add(ledgers),
-            network_id: Default::default(),
-            base_reserve: 10,
-            min_temp_entry_ttl: 30 * ONE_DAY_LEDGERS,
-            min_persistent_entry_ttl: 30 * ONE_DAY_LEDGERS,
-            max_entry_ttl: 365 * ONE_DAY_LEDGERS,
-        });
-    }
-
-    fn jump_time(&self, seconds: u64) {
-        self.ledger().set(LedgerInfo {
-            timestamp: self.ledger().timestamp().saturating_add(seconds),
-            protocol_version: 26,
-            sequence_number: self.ledger().sequence().saturating_add(1),
-            network_id: Default::default(),
-            base_reserve: 10,
-            min_temp_entry_ttl: 30 * ONE_DAY_LEDGERS,
-            min_persistent_entry_ttl: 30 * ONE_DAY_LEDGERS,
-            max_entry_ttl: 365 * ONE_DAY_LEDGERS,
-        });
-    }
-
-    fn set_default_info(&self) {
-        self.ledger().set(LedgerInfo {
-            timestamp: 1441065600, // Sept 1st, 2015 12:00:00 AM UTC
-            protocol_version: 26,
-            sequence_number: 100,
-            network_id: Default::default(),
-            base_reserve: 10,
-            min_temp_entry_ttl: 30 * ONE_DAY_LEDGERS,
-            min_persistent_entry_ttl: 30 * ONE_DAY_LEDGERS,
-            max_entry_ttl: 365 * ONE_DAY_LEDGERS,
-        });
-    }
-}
-
-// ── oracle ──────────────────────────────────────────────────────────────────
-
-/// SEP-40 types, XDR-equivalent to the ones the pool expects. Soroban encodes
-/// `contracttype` values by field and variant name, so these are
-/// wire-compatible as long as the names match.
-#[soroban_sdk::contracttype]
-#[derive(Clone)]
-pub enum Asset {
-    Stellar(Address),
-    Other(soroban_sdk::Symbol),
-}
-
-#[soroban_sdk::contracttype]
-#[derive(Clone)]
-pub struct PriceData {
-    pub price: i128,
-    pub timestamp: u64,
-}
-
-/// A SEP-40 price oracle that reports whatever `set_price` stored.
-pub mod mock_oracle {
-    use super::{Asset, PriceData};
-    use soroban_sdk::{contract, contractimpl, Address, Env, Symbol, Vec};
-
-    #[contract]
-    pub struct MockOracle;
-
-    #[contractimpl]
-    impl MockOracle {
-        /// Set the USD price for an asset (7 decimals, e.g. $1.00 = 1_000_0000).
-        pub fn set_price(e: Env, asset: Address, price: i128) {
-            e.storage().persistent().set(&asset, &price);
-        }
-
-        pub fn base(e: Env) -> Asset {
-            Asset::Other(Symbol::new(&e, "USD"))
-        }
-
-        pub fn decimals(_e: Env) -> u32 {
-            7
-        }
-
-        pub fn resolution(_e: Env) -> u32 {
-            300
-        }
-
-        pub fn lastprice(e: Env, asset: Asset) -> Option<PriceData> {
-            if let Asset::Stellar(addr) = asset {
-                let price: Option<i128> = e.storage().persistent().get(&addr);
-                price.map(|p| PriceData {
-                    price: p,
-                    timestamp: e.ledger().timestamp(),
-                })
-            } else {
-                None
-            }
-        }
-
-        pub fn price(e: Env, asset: Asset, _timestamp: u64) -> Option<PriceData> {
-            Self::lastprice(e, asset)
-        }
-
-        pub fn prices(e: Env, asset: Asset, _records: u32) -> Option<Vec<PriceData>> {
-            let data = Self::lastprice(e.clone(), asset)?;
-            let mut v = Vec::new(&e);
-            v.push_back(data);
-            Some(v)
-        }
-    }
-}
-
-pub fn create_mock_oracle<'a>(e: &Env) -> (Address, mock_oracle::MockOracleClient<'a>) {
-    let contract_id = e.register(mock_oracle::MockOracle {}, ());
-    (
-        contract_id.clone(),
-        mock_oracle::MockOracleClient::new(e, &contract_id),
-    )
 }
 
 // ── conformance ─────────────────────────────────────────────────────────────
@@ -652,9 +301,9 @@ pub mod mocksoroswap {
     }
 }
 
-/// Mock pool to test b_rate updates. Only the reserve read-side is
-/// implemented, so it cannot back a real deposit; see the real fixture above
-/// for that.
+/// Mock pool to test b_rate updates: a settable `b_rate` and nothing else.
+/// Only the reserve read-side is implemented, so it cannot back a real
+/// deposit; see the real fixture above for that.
 pub mod mockpool {
 
     use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env, Symbol};
@@ -662,9 +311,6 @@ pub mod mockpool {
     use crate::constants::SCALAR_7;
 
     const BRATE: Symbol = symbol_short!("b_rate");
-    const CONFIG: Symbol = symbol_short!("config");
-    const DATA: Symbol = symbol_short!("data");
-    const BACKSTOP_RATE: Symbol = symbol_short!("backstop");
 
     #[derive(Clone, Debug)]
     #[contracttype]
@@ -720,57 +366,29 @@ pub mod mockpool {
 
     #[contractimpl]
     impl MockPool {
-        /// Set the reserve b_rate. This overrides any set reserve data.
+        /// Set the reserve b_rate.
         pub fn set_b_rate(e: Env, b_rate: i128) {
             e.storage().instance().set(&BRATE, &b_rate);
         }
 
-        /// Set the backstop rate
-        pub fn set_backstop_rate(e: Env, bstop_rate: u32) {
-            e.storage().instance().set(&BACKSTOP_RATE, &bstop_rate);
-        }
-
-        /// Set the reserve data. Clears any set b_rate
-        pub fn set_data(e: Env, data: ReserveData) {
-            if e.storage().instance().has(&BRATE) {
-                e.storage().instance().remove(&BRATE);
-            }
-            e.storage().instance().set(&DATA, &data);
-        }
-
-        /// Set the reserve config
-        pub fn set_config(e: Env, config: ReserveConfig) {
-            e.storage().instance().set(&CONFIG, &config);
-        }
-
-        /// Note: All functionality only cares about the b_rate, except `max_deposit`.
+        /// Only `b_rate` is real; the rest of the reserve is defaulted.
         pub fn get_reserve(e: Env, reserve: Address) -> Reserve {
-            let mut r_data = e
-                .storage()
-                .instance()
-                .get(&DATA)
-                .unwrap_or(ReserveData::default());
-            if let Some(b_rate) = e.storage().instance().get(&BRATE) {
-                r_data.b_rate = b_rate;
-            }
+            let mut data = ReserveData::default();
+            data.b_rate = e.storage().instance().get(&BRATE).unwrap_or(0);
             Reserve {
                 asset: reserve,
-                config: e
-                    .storage()
-                    .instance()
-                    .get(&CONFIG)
-                    .unwrap_or(ReserveConfig::default()),
-                data: r_data,
+                config: ReserveConfig::default(),
+                data,
                 scalar: SCALAR_7,
             }
         }
 
-        /// Note: We are only interested in the bstop_rate and status.
+        /// An active pool with no backstop take rate.
         pub fn get_config(e: Env) -> PoolConfig {
             PoolConfig {
                 oracle: e.current_contract_address(),
                 min_collateral: 0,
-                bstop_rate: e.storage().instance().get(&BACKSTOP_RATE).unwrap_or(0),
+                bstop_rate: 0,
                 status: 0,
                 max_positions: 4,
             }
@@ -781,20 +399,6 @@ pub mod mockpool {
         let pool_address = e.register(MockPool {}, ());
         let client = MockPoolClient::new(e, &pool_address);
         client.set_b_rate(&b_rate);
-        client
-    }
-
-    pub fn register_mock_pool_with_config_and_data(
-        e: &Env,
-        bstop_rate: u32,
-        config: ReserveConfig,
-        data: ReserveData,
-    ) -> MockPoolClient<'_> {
-        let pool_address = e.register(MockPool {}, ());
-        let client = MockPoolClient::new(e, &pool_address);
-        client.set_backstop_rate(&bstop_rate);
-        client.set_config(&config);
-        client.set_data(&data);
         client
     }
 }

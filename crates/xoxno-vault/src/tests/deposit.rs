@@ -78,25 +78,3 @@ fn accrual_raises_share_value_for_existing_holders() {
     assert_eq!(f.vault.balance(&f.user), 1_000_0000000);
 }
 
-#[test]
-fn receiver_gets_the_shares_not_the_funds_owner() {
-    let f = VaultFixture::new();
-    f.vault.deposit(&1_000_0000000, &f.other, &f.user, &f.user);
-
-    assert_eq!(f.vault.balance(&f.other), 1_000_0000000);
-    assert_eq!(f.vault.balance(&f.user), 0);
-}
-
-#[test]
-#[should_panic(expected = "Error(Contract, #20)")]
-fn zero_deposit_is_refused() {
-    let f = VaultFixture::new();
-    f.vault.deposit(&0, &f.user, &f.user, &f.user);
-}
-
-#[test]
-#[should_panic(expected = "Error(Contract, #20)")]
-fn negative_deposit_is_refused() {
-    let f = VaultFixture::new();
-    f.vault.deposit(&-1, &f.user, &f.user, &f.user);
-}

@@ -3,7 +3,7 @@
 
 use super::fixture::VaultFixture;
 use crate::lending::constants::RAY;
-use crate::testutils::DEFAULT_SUPPLY_CAP;
+use vault_testkit::protocols::xoxno::DEFAULT_SUPPLY_CAP;
 
 /// The sharpest edge in the whole integration.
 ///
@@ -86,22 +86,6 @@ fn the_inflation_attack_does_not_work() {
     assert_eq!(f.vault.convert_to_assets(&minted), 1_000_0000000);
 }
 
-/// A `seize_positions` write-down must be reported, not hidden. The consumer's
-/// high-water mark is what decides how to treat it; the vault's job is to tell
-/// the truth.
-#[test]
-fn an_index_write_down_is_reported_honestly() {
-    let f = VaultFixture::new();
-    f.vault.deposit(&1_000_0000000, &f.user, &f.user, &f.user);
-    f.accrue(1_000); // +10%
-    assert_eq!(f.vault.convert_to_assets(&1_000_0000000), 1_100_0000000);
-
-    f.write_down(2_000); // -20% of the current index
-
-    assert_eq!(f.vault.convert_to_assets(&1_000_0000000), 880_0000000);
-    assert_eq!(f.vault.total_assets(), 880_0000000);
-}
-
 /// A consumer probing the rate at market creation must get a sane answer from
 /// an empty vault. A ratio-based vault divides by zero here and needs a
 /// bootstrap deposit first.
@@ -113,17 +97,6 @@ fn an_empty_vault_still_quotes_a_rate() {
 
     assert_eq!(f.vault.convert_to_assets(&1_0000000), 1_0000000);
     assert_eq!(f.vault.total_assets(), 0);
-}
-
-#[test]
-fn max_withdraw_tracks_the_holder_position() {
-    let f = VaultFixture::new();
-    f.vault.deposit(&1_000_0000000, &f.user, &f.user, &f.user);
-    assert_eq!(f.vault.max_withdraw(&f.user), 1_000_0000000);
-
-    f.accrue(500); // +5%
-    assert_eq!(f.vault.max_withdraw(&f.user), 1_050_0000000);
-    assert_eq!(f.vault.max_withdraw(&f.other), 0);
 }
 
 #[test]
@@ -173,10 +146,3 @@ fn max_deposit_is_zero_rather_than_negative_past_the_cap() {
     assert_eq!(f.vault.max_deposit(&f.user), 0);
 }
 
-/// The metadata `create_market`-style consumers read.
-#[test]
-fn share_token_metadata_matches_the_underlying_scale() {
-    let f = VaultFixture::new();
-    assert_eq!(f.vault.decimals(), 7);
-    assert_eq!(f.vault.query_asset(), f.asset);
-}

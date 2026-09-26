@@ -1,0 +1,69 @@
+# `make build` and `make test`, as locally: every adapter compiled with the
+# Stellar CLI, then the whole workspace including the conformance suite, which
+# stands up a real Blend deployment from the vendored binaries and needs
+# nothing outside this repo.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  STELLAR_CLI: "25.2.0"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: build and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The toolchain comes from rust-toolchain.toml; this only installs it.
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.91.1"
+          targets: wasm32v1-none
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install Stellar CLI ${{ env.STELLAR_CLI }}
+        run: |
+          mkdir -p "$HOME/.stellar-cli"
+          curl -sSL "https://github.com/stellar/stellar-cli/releases/download/v${STELLAR_CLI}/stellar-cli-${STELLAR_CLI}-x86_64-unknown-linux-gnu.tar.gz" \
+            | tar -xz -C "$HOME/.stellar-cli"
+          echo "$HOME/.stellar-cli" >> "$GITHUB_PATH"
+          "$HOME/.stellar-cli/stellar" --version
+
+      - name: Vendored Blend binaries are intact
+        working-directory: wasm/blend
+        run: sha256sum -c SHA256SUMS
+
+      - name: Build adapters
+        run: make build
+
+      - name: Test
+        run: make test
+
+      - name: Upload adapter binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: adapter-wasms-${{ github.sha }}
+          path: target/wasm32v1-none/release/*.wasm
+          retention-days: 14
+
+  audit:
+    name: dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.91.1"
+      - name: cargo audit
+        run: |
+          cargo install --locked cargo-audit
+          cargo audit

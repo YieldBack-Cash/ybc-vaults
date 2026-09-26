@@ -1,4 +1,4 @@
-use soroban_sdk::{panic_with_error, unwrap::UnwrapOptimized, Address, Env, Symbol};
+use soroban_sdk::{contracttype, panic_with_error, Address, Env, IntoVal, TryFromVal, Val};
 use vault_common::VaultError;
 
 use crate::vault::VaultData;
@@ -6,14 +6,25 @@ use crate::vault::VaultData;
 // Share balances and allowances are OpenZeppelin's (`stellar_tokens::fungible::Base`)
 // and never appear here.
 
-//---------- Storage Keys ----------//
-
-const POOL_KEY: &str = "Pool";
-const ADMIN_KEY: &str = "Admin";
-const ASSET_KEY: &str = "Asset";
-const VAULT_DATA_KEY: &str = "Vault";
-const ROUTER_KEY: &str = "Router";
-const BLND_TOKEN_KEY: &str = "BlndToken";
+/// Every key this contract writes. Typed, so a key is a variant rather than a
+/// string built at each call, and a missing required key always raises the
+/// same typed `NotInitialized` rather than an opaque trap.
+#[contracttype]
+#[derive(Clone)]
+pub enum DataKey {
+    /// The Blend pool supplied into (instance).
+    Pool,
+    /// The reserve asset (instance).
+    Asset,
+    /// Authorized for `set_admin` and `set_router` (instance).
+    Admin,
+    /// The BLND token, for emissions harvesting (instance).
+    BlndToken,
+    /// The Soroswap router for harvesting; absent until `set_router` (instance).
+    Router,
+    /// The share/bToken ratio state (persistent).
+    Vault,
+}
 
 //---------- TTL ----------//
 
@@ -24,69 +35,57 @@ const LEDGER_THRESHOLD_VAULT: u32 = LEDGER_BUMP_VAULT - 20 * ONE_DAY_LEDGERS;
 
 //---------- Instance ----------//
 
+/// A required instance value, or `NotInitialized`.
+fn required<T: TryFromVal<Env, Val>>(e: &Env, key: DataKey) -> T {
+    e.storage()
+        .instance()
+        .get(&key)
+        .unwrap_or_else(|| panic_with_error!(e, VaultError::NotInitialized))
+}
+
+fn set_instance<T: IntoVal<Env, Val>>(e: &Env, key: DataKey, value: &T) {
+    e.storage().instance().set(&key, value);
+}
+
 pub fn get_pool(e: &Env) -> Address {
-    e.storage()
-        .instance()
-        .get::<Symbol, Address>(&Symbol::new(e, POOL_KEY))
-        .unwrap_optimized()
+    required(e, DataKey::Pool)
 }
 
-pub fn set_pool(e: &Env, pool: Address) {
-    e.storage()
-        .instance()
-        .set::<Symbol, Address>(&Symbol::new(e, POOL_KEY), &pool);
-}
-
-pub fn get_admin(e: &Env) -> Address {
-    e.storage()
-        .instance()
-        .get::<Symbol, Address>(&Symbol::new(e, ADMIN_KEY))
-        .unwrap_optimized()
-}
-
-pub fn set_admin(e: &Env, admin: Address) {
-    e.storage()
-        .instance()
-        .set::<Symbol, Address>(&Symbol::new(e, ADMIN_KEY), &admin);
+pub fn set_pool(e: &Env, pool: &Address) {
+    set_instance(e, DataKey::Pool, pool);
 }
 
 pub fn get_asset(e: &Env) -> Address {
-    e.storage()
-        .instance()
-        .get::<Symbol, Address>(&Symbol::new(e, ASSET_KEY))
-        .unwrap_optimized()
+    required(e, DataKey::Asset)
 }
 
-pub fn set_asset(e: &Env, asset: Address) {
-    e.storage()
-        .instance()
-        .set::<Symbol, Address>(&Symbol::new(e, ASSET_KEY), &asset);
+pub fn set_asset(e: &Env, asset: &Address) {
+    set_instance(e, DataKey::Asset, asset);
+}
+
+pub fn get_admin(e: &Env) -> Address {
+    required(e, DataKey::Admin)
+}
+
+pub fn set_admin(e: &Env, admin: &Address) {
+    set_instance(e, DataKey::Admin, admin);
+}
+
+pub fn get_blnd_token(e: &Env) -> Address {
+    required(e, DataKey::BlndToken)
+}
+
+pub fn set_blnd_token(e: &Env, blnd_token: &Address) {
+    set_instance(e, DataKey::BlndToken, blnd_token);
 }
 
 /// The Soroswap router used to harvest BLND, or `None` until `set_router`.
 pub fn get_router(e: &Env) -> Option<Address> {
-    e.storage()
-        .instance()
-        .get::<Symbol, Address>(&Symbol::new(e, ROUTER_KEY))
+    e.storage().instance().get(&DataKey::Router)
 }
 
-pub fn set_router(e: &Env, router: Address) {
-    e.storage()
-        .instance()
-        .set::<Symbol, Address>(&Symbol::new(e, ROUTER_KEY), &router);
-}
-
-pub fn get_blnd_token(e: &Env) -> Address {
-    e.storage()
-        .instance()
-        .get::<Symbol, Address>(&Symbol::new(e, BLND_TOKEN_KEY))
-        .unwrap_optimized()
-}
-
-pub fn set_blnd_token(e: &Env, blnd_token: Address) {
-    e.storage()
-        .instance()
-        .set::<Symbol, Address>(&Symbol::new(e, BLND_TOKEN_KEY), &blnd_token);
+pub fn set_router(e: &Env, router: &Address) {
+    set_instance(e, DataKey::Router, router);
 }
 
 //---------- Persistent ----------//
@@ -94,19 +93,16 @@ pub fn set_blnd_token(e: &Env, blnd_token: Address) {
 // when accessed, so bumping on write is sufficient.
 
 pub fn set_vault_data(e: &Env, vault: &VaultData) {
-    let key = Symbol::new(e, VAULT_DATA_KEY);
-    e.storage()
-        .persistent()
-        .set::<Symbol, VaultData>(&key, vault);
+    let key = DataKey::Vault;
+    e.storage().persistent().set(&key, vault);
     e.storage()
         .persistent()
         .extend_ttl(&key, LEDGER_THRESHOLD_VAULT, LEDGER_BUMP_VAULT);
 }
 
 pub fn get_vault_data(e: &Env) -> VaultData {
-    let key = Symbol::new(e, VAULT_DATA_KEY);
     e.storage()
         .persistent()
-        .get::<Symbol, VaultData>(&key)
+        .get(&DataKey::Vault)
         .unwrap_or_else(|| panic_with_error!(e, VaultError::NotInitialized))
 }

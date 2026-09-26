@@ -19,7 +19,7 @@
 //! # What is shared
 //!
 //! The share token (OpenZeppelin `Base`), the operator-allowance rule, the
-//! positive-amount guard, the TTL policy and the `Deposit`/`Redeem` events all
+//! positive-amount guard, the TTL policy and the `Deposit`/`Withdraw` events all
 //! come from `vault_common`. This crate holds only what is
 //! Blend's: the pool client, the bToken ratio maths, and emissions harvesting.
 //!

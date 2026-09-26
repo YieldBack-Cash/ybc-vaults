@@ -3,14 +3,13 @@ use soroban_sdk::{
     token::{StellarAssetClient, TokenClient},
     Address, Env, String,
 };
+use vault_testkit::protocols::xoxno::{HubAssetKey, MockController, MockControllerClient};
 use vault_testkit::ConformanceFixture;
 
 use crate::contract::{XoxnoVault, XoxnoVaultClient};
 use crate::lending::constants::RAY;
-use crate::testutils::{MockController, MockControllerClient};
 
-pub const HUB_ID: u32 = 1;
-pub const SPOKE_ID: u32 = 1;
+pub use vault_testkit::protocols::xoxno::{HUB_ID, SPOKE_ID};
 
 pub struct VaultFixture<'a> {
     pub e: Env,
@@ -94,16 +93,14 @@ impl<'a> VaultFixture<'a> {
 
     /// A `seize_positions`-style write-down: drop the index by `bps`.
     pub fn write_down(&self, bps: i128) {
-        let index = self
-            .controller
-            .get_market_index(&self.hub_asset())
-            .supply_index;
+        let index = self.index();
         self.controller
             .set_supply_index(&(index - index * bps / 10_000));
     }
 
-    pub fn hub_asset(&self) -> crate::lending::controller::HubAssetKey {
-        crate::lending::controller::HubAssetKey {
+    /// The market key, in the mock's own type (XDR-identical to the adapter's).
+    pub fn hub_asset(&self) -> HubAssetKey {
+        HubAssetKey {
             asset: self.asset.clone(),
             hub_id: HUB_ID,
         }

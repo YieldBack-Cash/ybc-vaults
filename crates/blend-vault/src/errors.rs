@@ -24,4 +24,6 @@ pub enum BlendVaultError {
     InvalidSharesBurnt = 204,
     /// `claim_emissions` was called before `set_router`.
     SwapNotConfigured = 205,
+    /// The swap router returned no output amount for the asset leg.
+    SwapNoOutput = 206,
 }

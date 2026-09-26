@@ -1,10 +1,8 @@
-//! A stand-in for the XOXNO controller.
+//! A stand-in for the XOXNO lending controller. XOXNO publishes no test
+//! fixture for it; this is the mock the adapter's own suite and YBC's market
+//! tests both run on.
 //!
-//! Modelled on `blend-vault-v2`'s `mod mockpool`: enough of the real contract to
-//! drive the vault, with the market state settable directly so tests can force
-//! conditions the real protocol only produces occasionally.
-//!
-//! Three behaviours are reproduced deliberately, because the vault's
+//! Three behaviours are reproduced deliberately, because the adapter's
 //! correctness arguments depend on them:
 //!
 //! * **Ray-scaled positions.** The controller stores every scaled amount as a
@@ -22,21 +20,84 @@
 //!
 //! `set_supply_index` accepts a *lower* value than the current one, so the
 //! `seize_positions` bad-debt write-down can be simulated.
+//!
+//! The types are declared here by name to match the deployed controller's
+//! (and the adapter's `lending` mirror of `xoxno-contract-sdk`); Soroban
+//! encodes `contracttype` values by field name, so a rename fails at the call
+//! boundary rather than at compile time.
 
 use soroban_sdk::{
     contract, contractimpl, contracttype, token::TokenClient, Address, Env, Map, Vec,
 };
 use vault_common::math::mul_div_floor;
 
-use crate::lending::constants::{NEW_ACCOUNT, RAY, WITHDRAW_ALL};
-use crate::lending::controller::{
-    AccountPositionRaw, DebtPositionRaw, HubAssetKey, MarketIndexRaw, SpokeAssetConfig,
-    SpokeUsageRaw,
-};
-use crate::vault::SCALED_UNIT;
+/// Interest indexes are 27-decimal fixed point.
+pub const RAY: i128 = 1_000_000_000_000_000_000_000_000_000;
+/// `10^(27 - 7)`: the factor between a 7-decimal asset amount and its Ray form.
+pub const SCALED_UNIT: i128 = 100_000_000_000_000_000_000;
+/// The account id a first supply passes to have the controller open one.
+pub const NEW_ACCOUNT: u64 = 0;
+/// The withdrawal amount the controller reads as "everything".
+pub const WITHDRAW_ALL: i128 = 0;
+
+pub const HUB_ID: u32 = 1;
+pub const SPOKE_ID: u32 = 1;
 
 /// Spoke 1's live mainnet supply cap for hub 1 USDC: 5,000,000 at 7 decimals.
 pub const DEFAULT_SUPPLY_CAP: i128 = 50_000_000_000_000;
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HubAssetKey {
+    pub asset: Address,
+    pub hub_id: u32,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MarketIndexRaw {
+    pub borrow_index: i128,
+    pub supply_index: i128,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AccountPositionRaw {
+    pub liquidation_bonus: u32,
+    pub liquidation_fees: u32,
+    pub liquidation_threshold: u32,
+    pub loan_to_value: u32,
+    pub scaled_amount: i128,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DebtPositionRaw {
+    pub scaled_amount: i128,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SpokeAssetConfig {
+    pub borrow_cap: i128,
+    pub frozen: bool,
+    pub is_borrowable: bool,
+    pub is_collateralizable: bool,
+    pub liquidation_bonus: u32,
+    pub liquidation_fees: u32,
+    pub liquidation_threshold: u32,
+    pub loan_to_value: u32,
+    pub no_seize: bool,
+    pub paused: bool,
+    pub supply_cap: i128,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SpokeUsageRaw {
+    pub borrowed_scaled_ray: i128,
+    pub supplied_scaled_ray: i128,
+}
 
 /// `Ray::from_asset(amount, 7).div_floor(index)`: the scaled units a supply of
 /// `amount` (7 decimals) credits.
@@ -89,6 +150,8 @@ impl MockController {
         e.storage().instance().set(&MockKey::Paused, &false);
     }
 
+    // ── test controls ───────────────────────────────────────────────────────
+
     pub fn set_supply_cap(e: Env, cap: i128) {
         e.storage().instance().set(&MockKey::SupplyCap, &cap);
     }
@@ -96,8 +159,6 @@ impl MockController {
     pub fn set_paused(e: Env, paused: bool) {
         e.storage().instance().set(&MockKey::Paused, &paused);
     }
-
-    // ── test controls ───────────────────────────────────────────────────────
 
     /// Move the market's supply index. Raising it simulates interest accrual;
     /// lowering it simulates `seize_positions` socializing bad debt.

@@ -1,0 +1,32 @@
+# Reproducible release builds of the two adapters through Stellar Expert's
+# workflow: on a version tag each is built in a pinned container, its WASM and
+# hash attached to a GitHub release, and the build registered so the explorer
+# shows a deployed vault as verified against this source.
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  id-token: write
+  contents: write
+  attestations: write
+
+jobs:
+  release:
+    strategy:
+      fail-fast: false
+      matrix:
+        package:
+          - blend-vault
+          - xoxno-vault
+    uses: stellar-expert/soroban-build-workflow/.github/workflows/release.yml@main
+    with:
+      release_name: ${{ github.ref_name }}-${{ matrix.package }}
+      release_description: "YBC ${{ matrix.package }} at ${{ github.ref_name }}; WASM hash attached for on-chain verification"
+      package: ${{ matrix.package }}
+      home_domain: yieldback.cash
+    secrets:
+      release_token: ${{ secrets.GITHUB_TOKEN }}

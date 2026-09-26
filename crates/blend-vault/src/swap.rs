@@ -1,4 +1,6 @@
-use soroban_sdk::{contractclient, token::TokenClient, vec, Address, Env, Vec};
+use soroban_sdk::{contractclient, panic_with_error, token::TokenClient, vec, Address, Env, Vec};
+
+use crate::errors::BlendVaultError;
 
 #[contractclient(name = "SoroswapRouterClient")]
 pub trait SoroswapRouter {
@@ -40,5 +42,9 @@ pub fn swap_blnd_for_asset(
         &deadline,
     );
 
-    amounts.get(1).unwrap()
+    // One amount per hop: [in, out]. A router that answers otherwise is
+    // misconfigured, which is a typed error, not a trap.
+    amounts
+        .get(1)
+        .unwrap_or_else(|| panic_with_error!(e, BlendVaultError::SwapNoOutput))
 }

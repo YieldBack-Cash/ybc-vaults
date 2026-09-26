@@ -8,9 +8,6 @@ description = "SEP-56 tokenized vault over a XOXNO lending position, for YBC PT/
 crate-type = ["cdylib", "rlib"]
 doctest = false
 
-[features]
-testutils = ["soroban-sdk/testutils"]
-
 [dependencies]
 soroban-sdk = { workspace = true }
 stellar-tokens = { workspace = true }

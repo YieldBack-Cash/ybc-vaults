@@ -111,18 +111,22 @@ script.
 
 ## What is shared and what is XOXNO's
 
-The share token (OpenZeppelin `Base`), the operator-allowance rule on `redeem`,
-the positive-amount guard, the TTL policy, the `Deposit`/`Redeem` events and
-the widening multiply come from `vault-common`. The `tests/conformance.rs` file
-binds this crate's fixture to `vault-testkit`, which runs the same 37 properties
-against every adapter.
+The share token (OpenZeppelin `Base`), the SEP-56 declaration
+(`impl_sep56!` writes `preview_deposit`, `preview_redeem`, `max_redeem`,
+`max_withdraw` and `max_mint`, and compile-checks the rest), the
+operator-allowance rule on `redeem` and `withdraw`, the positive-amount guard,
+the TTL policy, the `Deposit`/`Withdraw` events and the widening multiply come
+from `vault-common`. The `tests/conformance.rs` file binds this crate's fixture
+to `vault-testkit`, which runs the same 36 properties against every adapter.
 
 This crate owns only what is XOXNO's: the `lending/` mirror of
 `xoxno-contract-sdk` (see below), the account-id sentinel, the index maths
 (`vault.rs`), the
-`max_*`/`total_assets` views, and the two XOXNO-specific errors
-(`ZeroAssetRedeem = 300`, `NoAccount = 301`; shared codes are 10–49,
-OpenZeppelin's are 100–199).
+`max_deposit`/`total_assets` views, and the four XOXNO-specific errors
+(`ZeroAssetRedeem = 300`, `NoAccount = 301`, `UnsupportedDecimals = 302`,
+`MintShortfall = 303`; shared codes are 10–49, OpenZeppelin's are 100–199).
+The mock controller the tests run on lives in
+`vault_testkit::protocols::xoxno`, shared with YBC's market tests.
 
 ## Notes for anyone extending this
 
@@ -175,7 +179,7 @@ the SDK's own paths, names, constants and doc comments:
 | `crate::lending::controller::{HubAssetKey, MarketIndexRaw, …}`   | `lending::controller::*`  |
 | `crate::lending::ControllerClient`          | `lending::ControllerClient`                    |
 | `crate::lending::helpers::authorize_transfer_as_current` | `lending::helpers::…`           |
-| `testutils::MockController`                 | `testutils::LendingFixture`                    |
+| `vault_testkit::protocols::xoxno::MockController` | `testutils::LendingFixture`              |
 
 The migration is a path change (`crate::lending` → `xoxno_contract_sdk::lending`),
 deleting `src/lending/`, and swapping the mock for `LendingFixture` in the

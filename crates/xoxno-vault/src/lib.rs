@@ -45,7 +45,7 @@
 //! # What is shared
 //!
 //! The share token, the operator-allowance rule, the positive-amount guard,
-//! the TTL policy, the `Deposit`/`Redeem` events and the widening multiply all
+//! the TTL policy, the `Deposit`/`Withdraw` events and the widening multiply all
 //! come from `vault_common`. This crate holds only what
 //! is XOXNO's: the `lending` mirror of `xoxno-contract-sdk`, the account
 //! sentinel, and the index maths.
@@ -56,9 +56,6 @@ mod events;
 mod lending;
 mod storage;
 mod vault;
-
-#[cfg(any(test, feature = "testutils"))]
-pub mod testutils;
 
 #[cfg(test)]
 mod tests;

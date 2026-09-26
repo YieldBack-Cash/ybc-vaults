@@ -18,7 +18,7 @@
 //! never call.
 
 use soroban_sdk::{
-    contractclient, testutils::Address as _, token::TokenClient, xdr::ScErrorCode, Address, Env,
+    testutils::Address as _, token::TokenClient, xdr::ScErrorCode, Address, Env,
     Error, InvokeError,
 };
 
@@ -46,33 +46,9 @@ pub trait ConformanceFixture {
     fn write_down(&self, bps: i128) -> bool;
 }
 
-/// The full SEP-56 interface, as the standard declares it.
-#[contractclient(name = "VaultClient")]
-pub trait Sep56Vault {
-    fn total_supply(e: &Env) -> i128;
-    fn query_asset(e: &Env) -> Address;
-    fn total_assets(e: &Env) -> i128;
-    fn convert_to_shares(e: &Env, assets: i128) -> i128;
-    fn convert_to_assets(e: &Env, shares: i128) -> i128;
-    fn max_deposit(e: &Env, receiver: Address) -> i128;
-    fn preview_deposit(e: &Env, assets: i128) -> i128;
-    fn deposit(e: &Env, assets: i128, receiver: Address, from: Address, operator: Address) -> i128;
-    fn max_mint(e: &Env, receiver: Address) -> i128;
-    fn preview_mint(e: &Env, shares: i128) -> i128;
-    fn mint(e: &Env, shares: i128, receiver: Address, from: Address, operator: Address) -> i128;
-    fn max_withdraw(e: &Env, owner: Address) -> i128;
-    fn preview_withdraw(e: &Env, assets: i128) -> i128;
-    fn withdraw(
-        e: &Env,
-        assets: i128,
-        receiver: Address,
-        owner: Address,
-        operator: Address,
-    ) -> i128;
-    fn max_redeem(e: &Env, owner: Address) -> i128;
-    fn preview_redeem(e: &Env, shares: i128) -> i128;
-    fn redeem(e: &Env, shares: i128, receiver: Address, owner: Address, operator: Address) -> i128;
-}
+/// The conformance client: SEP-56 exactly as `vault_common::sep56` declares
+/// it, which is also what every adapter is compile-checked against.
+pub use vault_common::sep56::{Sep56Client as VaultClient, Sep56Vault};
 
 pub const ONE: i128 = 1_0000000;
 pub const DEPOSIT: i128 = 1_000 * ONE;
@@ -143,6 +119,8 @@ pub fn assert_failed<T: core::fmt::Debug, E: core::fmt::Debug>(
 }
 
 pub mod conformance;
+pub mod ledger;
+pub mod protocols;
 
 /// Emits one `#[test]` per conformance property, each constructing a fixture
 /// from `$fixture`.

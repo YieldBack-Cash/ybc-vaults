@@ -22,6 +22,10 @@ pub struct XoxnoVault;
 // SEP-41 on the same address as the SEP-56 surface, delegated to OpenZeppelin.
 vault_common::impl_share_token!(XoxnoVault);
 
+// The five SEP-56 views a fee-less vault fully determines, and the
+// compile-time check that the twelve below complete the standard.
+vault_common::impl_sep56!(XoxnoVault);
+
 fn hub_asset(cfg: &Config) -> HubAssetKey {
     HubAssetKey {
         asset: cfg.asset.clone(),
@@ -281,13 +285,6 @@ impl XoxnoVault {
         }
     }
 
-    /// Shares a deposit of `assets` would mint, floored. No fees, so this is
-    /// `convert_to_shares`; the actual mint is measured from XOXNO and can only
-    /// be this or more.
-    pub fn preview_deposit(e: &Env, assets: i128) -> i128 {
-        Self::convert_to_shares(e, assets)
-    }
-
     /// Pulls `assets` from `from`, supplies them to XOXNO, and mints the
     /// resulting shares to `receiver`. Returns the shares minted.
     pub fn deposit(
@@ -310,13 +307,6 @@ impl XoxnoVault {
     }
 
     // ── SEP-56: mint ────────────────────────────────────────────────────────
-
-    /// `max_deposit` in shares, floored.
-    pub fn max_mint(e: &Env, receiver: Address) -> i128 {
-        let cfg = storage::get_config(e);
-        let index = supply_index(e, &cfg);
-        assets_to_shares(e, Self::max_deposit(e, receiver), index)
-    }
 
     /// Assets needed to mint `shares`, rounded up.
     pub fn preview_mint(e: &Env, shares: i128) -> i128 {
@@ -357,11 +347,6 @@ impl XoxnoVault {
 
     // ── SEP-56: withdraw ────────────────────────────────────────────────────
 
-    /// What `owner` could redeem right now, in assets.
-    pub fn max_withdraw(e: &Env, owner: Address) -> i128 {
-        Self::convert_to_assets(e, Base::balance(e, &owner))
-    }
-
     /// Shares a withdrawal of `assets` would burn, rounded up.
     pub fn preview_withdraw(e: &Env, assets: i128) -> i128 {
         let cfg = storage::get_config(e);
@@ -393,17 +378,6 @@ impl XoxnoVault {
     }
 
     // ── SEP-56: redeem ──────────────────────────────────────────────────────
-
-    /// The owner's share balance: every share can be redeemed.
-    pub fn max_redeem(e: &Env, owner: Address) -> i128 {
-        Base::balance(e, &owner)
-    }
-
-    /// Assets a redeem of `shares` would pay, floored. No fees, so this is
-    /// `convert_to_assets`, and `redeem` pays exactly this.
-    pub fn preview_redeem(e: &Env, shares: i128) -> i128 {
-        Self::convert_to_assets(e, shares)
-    }
 
     /// Burns **exactly** `shares` from `owner` and withdraws the corresponding
     /// assets (floored) to `receiver`. Returns the assets paid.

@@ -56,15 +56,18 @@ there is no admin token-rescue function and nothing an admin can move.
 
 ## What is shared and what is Blend's
 
-The share token (OpenZeppelin `Base`), the operator-allowance rule on `redeem`,
-the positive-amount guard, the TTL policy, the `Deposit`/`Redeem` events and
-the widening multiply come from `vault-common`. `tests/conformance.rs` binds
-this crate's fixture to `vault-testkit`, which runs the same 37 properties
-against every adapter, here on a real Blend pool.
+The share token (OpenZeppelin `Base`), the SEP-56 declaration
+(`impl_sep56!` writes `preview_deposit`, `preview_redeem`, `max_redeem`,
+`max_withdraw` and `max_mint`, and compile-checks the rest), the
+operator-allowance rule on `redeem` and `withdraw`, the positive-amount guard,
+the TTL policy, the `Deposit`/`Withdraw` events and the widening multiply come
+from `vault-common`. `tests/conformance.rs` binds this crate's fixture to
+`vault-testkit`, which runs the same 36 properties against every adapter,
+here on a real Blend pool.
 
 This crate owns the pool client (`pool.rs`, generated from the vendored
 `wasm/blend/pool.wasm`), the ratio maths (`vault.rs`), emissions harvesting
-(`swap.rs`, `claim_emissions`), and its own errors (`200`–`205`; shared codes
+(`swap.rs`, `claim_emissions`), and its own errors (`200`–`206`; shared codes
 are 10–49, OpenZeppelin's 100–199).
 
 ## Build and test
@@ -76,9 +79,12 @@ make test    # cargo test --workspace
 make build   # stellar contract build --optimize
 ```
 
-The tests deploy a real Blend stack from `wasm/blend/`; see `MANIFEST.md`
-there for provenance. `blend-contract-sdk` is not a dependency because it pins
-its own `soroban-sdk`, but the generated clients are identical.
+The tests deploy a real Blend stack from `wasm/blend/` through
+`vault_testkit::protocols::blend`; see `MANIFEST.md` there for provenance.
+`blend-contract-sdk` is not a dependency because it pins its own
+`soroban-sdk`, but the generated clients are identical. The crate's own tests
+cover only what is Blend's (the bToken ratio, emissions, admin, pool status);
+the standard's behaviour is the conformance suite's job.
 
 ## Deployment
 

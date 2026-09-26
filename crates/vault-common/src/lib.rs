@@ -11,6 +11,9 @@
 //!
 //! * the SEP-41 share token, delegated to OpenZeppelin's `Base` through
 //!   [`impl_share_token!`] so no adapter hand-rolls balances or allowances;
+//! * the SEP-56 interface declared once ([`sep56`]): [`impl_sep56!`] writes
+//!   the five views the standard fully determines and makes a missing or
+//!   misshaped function a compile error at the adapter;
 //! * the operator-allowance rule for delegated exits ([`auth`]);
 //! * the positive-amount guard every entry point must call ([`guard`]);
 //! * a widening `mul_div_floor` on `U256` ([`math`]): the SDK's `i128` overflows
@@ -26,6 +29,7 @@ pub mod errors;
 pub mod events;
 pub mod guard;
 pub mod math;
+pub mod sep56;
 pub mod token;
 pub mod ttl;
 
