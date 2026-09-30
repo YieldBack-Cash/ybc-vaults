@@ -30,13 +30,23 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
 
+      # The CLI is installed the way the Stellar docs prescribe. crates.io
+      # versions are immutable and Cargo checks every crate against the
+      # registry's checksums, which the release tarball this replaced never
+      # was. Compiling it takes minutes, so the binary is cached per version
+      # and the install is skipped when the cache already holds it.
+      - name: Cache Stellar CLI ${{ env.STELLAR_CLI }}
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/stellar
+          key: stellar-cli-${{ env.STELLAR_CLI }}-${{ runner.os }}
+
       - name: Install Stellar CLI ${{ env.STELLAR_CLI }}
         run: |
-          mkdir -p "$HOME/.stellar-cli"
-          curl -sSL "https://github.com/stellar/stellar-cli/releases/download/v${STELLAR_CLI}/stellar-cli-${STELLAR_CLI}-x86_64-unknown-linux-gnu.tar.gz" \
-            | tar -xz -C "$HOME/.stellar-cli"
-          echo "$HOME/.stellar-cli" >> "$GITHUB_PATH"
-          "$HOME/.stellar-cli/stellar" --version
+          if ! stellar --version 2>/dev/null | grep -q "^stellar ${STELLAR_CLI} "; then
+            cargo install --locked stellar-cli@"${STELLAR_CLI}"
+          fi
+          stellar --version
 
       - name: Vendored Blend binaries are intact
         working-directory: wasm/blend
