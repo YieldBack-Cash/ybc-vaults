@@ -3,8 +3,9 @@
 //! The Blend protocol itself (deployer, pools, oracle, ledger movement) lives
 //! in `vault_testkit::protocols::blend` and is re-exported here; this module
 //! adds only what is this crate's: registering the vault, the fixture the
-//! shared conformance suite runs on, and two mocks for unit tests (a pool that
-//! is nothing but a settable `b_rate`, and a 1:1 swap router).
+//! shared conformance suite runs on, and three mocks for unit tests (a pool
+//! that is nothing but a settable `b_rate`, a 1:1 swap router, and a router
+//! that pays less than it reports).
 
 use crate::constants::SCALAR_7;
 use crate::BlendVault;
@@ -298,6 +299,48 @@ pub mod mocksoroswap {
     pub fn register_mock_soroswap_router(e: &soroban_sdk::Env) -> MockSoroswapRouterClient<'_> {
         let addr = e.register(MockSoroswapRouter {}, ());
         MockSoroswapRouterClient::new(e, &addr)
+    }
+}
+
+/// A router that does not do what it says: it takes the whole input, pays a
+/// fixed `payout` of the output token whatever floor it was given, and
+/// reports the floor as met. What the vault must not believe.
+pub mod mockshortrouter {
+    use soroban_sdk::{contract, contractimpl, symbol_short, token::TokenClient, Address, Env, Vec};
+
+    #[contract]
+    pub struct MockShortRouter;
+
+    #[contractimpl]
+    impl MockShortRouter {
+        pub fn __constructor(e: Env, payout: i128) {
+            e.storage().instance().set(&symbol_short!("payout"), &payout);
+        }
+
+        pub fn swap_exact_tokens_for_tokens(
+            e: Env,
+            amount_in: i128,
+            amount_out_min: i128,
+            path: Vec<Address>,
+            to: Address,
+            _deadline: u64,
+        ) -> Vec<i128> {
+            let router = e.current_contract_address();
+            let token_in = path.get(0).unwrap();
+            let token_out = path.get(1).unwrap();
+            TokenClient::new(&e, &token_in).transfer_from(&router, &to, &router, &amount_in);
+
+            let payout: i128 = e.storage().instance().get(&symbol_short!("payout")).unwrap();
+            if payout > 0 {
+                TokenClient::new(&e, &token_out).transfer(&router, &to, &payout);
+            }
+            soroban_sdk::vec![&e, amount_in, amount_out_min.max(amount_in)]
+        }
+    }
+
+    pub fn register_mock_short_router(e: &soroban_sdk::Env, payout: i128) -> MockShortRouterClient<'_> {
+        let addr = e.register(MockShortRouter {}, (payout,));
+        MockShortRouterClient::new(e, &addr)
     }
 }
 

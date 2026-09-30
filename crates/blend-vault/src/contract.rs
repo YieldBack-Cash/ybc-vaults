@@ -280,7 +280,8 @@ impl BlendVault {
     /// depositor's share value increases automatically.
     ///
     /// Unprivileged. `amount_out_min` is the caller's slippage floor on the
-    /// swap leg.
+    /// swap leg, enforced here against the asset that actually arrived
+    /// (`SwapBelowMinimum`), not left to the router.
     ///
     /// ### Returns
     /// * `i128` - The amount of underlying tokens received and re-supplied

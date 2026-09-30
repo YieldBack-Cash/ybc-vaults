@@ -2,12 +2,13 @@
 
 use crate::blend::pool::Client as PoolClient;
 use crate::storage::ONE_DAY_LEDGERS;
+use crate::errors::BlendVaultError;
 use crate::testutils::{
-    create_blend_pool, mocksoroswap, register_blend_vault, setup_pool_util_rate, BlendFixture,
-    EnvTestUtils, MockTokenClient,
+    create_blend_pool, mockshortrouter, mocksoroswap, register_blend_vault, setup_pool_util_rate,
+    BlendFixture, EnvTestUtils, MockTokenClient,
 };
 use crate::BlendVaultClient;
-use soroban_sdk::{testutils::Address as _, Address, Env};
+use soroban_sdk::{testutils::Address as _, Address, Env, Error};
 
 /// Full claim_emissions flow using a mock Soroswap router.
 ///
@@ -143,4 +144,106 @@ fn test_claim_emissions_zero_blnd_returns_zero() {
     // no deposit → no supply position → no BLND accrued
     let result = blend_vault_client.claim_emissions(&0);
     assert_eq!(result, 0);
+}
+
+// ── the floor is the vault's to enforce ──────────────────────────────────────
+
+/// A vault with a supply position and BLND emissions ready to claim, whose
+/// router pays `payout` of the underlying for any swap and reports the floor
+/// as met.
+fn vault_with_emissions_and_short_router(e: &Env, payout: i128) -> BlendVaultClient<'_> {
+    e.cost_estimate().budget().reset_unlimited();
+    e.mock_all_auths();
+    e.set_default_info();
+
+    let bombadil = Address::generate(e);
+    let frodo = Address::generate(e);
+
+    let blnd = e
+        .register_stellar_asset_contract_v2(bombadil.clone())
+        .address();
+    let usdc = e
+        .register_stellar_asset_contract_v2(bombadil.clone())
+        .address();
+    let xlm = e
+        .register_stellar_asset_contract_v2(bombadil.clone())
+        .address();
+    let usdc_client = MockTokenClient::new(e, &usdc);
+    let xlm_client = MockTokenClient::new(e, &xlm);
+
+    let blend_fixture = BlendFixture::deploy(e, &bombadil, &blnd, &usdc);
+    let pool = create_blend_pool(e, &blend_fixture, &bombadil, &usdc_client, &xlm_client);
+    let pool_client = PoolClient::new(e, &pool);
+
+    let router = mockshortrouter::register_mock_short_router(e, payout).address;
+    usdc_client.mint(&router, &10_000_000_0000000);
+
+    let vault = register_blend_vault(e, &bombadil, &pool, &usdc, &blnd);
+    let blend_vault_client = BlendVaultClient::new(e, &vault);
+    blend_vault_client.set_router(&router);
+
+    setup_pool_util_rate(e, &pool, &bombadil, &usdc, &xlm, 100_000_0000000);
+
+    let deposit = 10_000_0000000_i128;
+    usdc_client.mint(&frodo, &deposit);
+    blend_vault_client.deposit(&deposit, &frodo, &frodo, &frodo);
+
+    e.jump(ONE_DAY_LEDGERS * 7);
+    blend_fixture.emitter.distribute();
+    blend_fixture.backstop.distribute();
+    pool_client.gulp_emissions();
+    e.jump(ONE_DAY_LEDGERS * 3);
+
+    blend_vault_client
+}
+
+/// The router takes the BLND, pays ten stroops and says the floor was met.
+/// The vault measures what arrived and refuses.
+#[test]
+fn test_claim_emissions_enforces_the_floor_on_what_arrived() {
+    let e = Env::default();
+    let vault = vault_with_emissions_and_short_router(&e, 10);
+
+    let result = vault.try_claim_emissions(&1_000_0000000);
+    assert_eq!(
+        result.err(),
+        Some(Ok(Error::from_contract_error(
+            BlendVaultError::SwapBelowMinimum as u32
+        )))
+    );
+
+    // One stroop over what the router pays is refused; exactly that is not.
+    assert_eq!(
+        vault.try_claim_emissions(&11).err(),
+        Some(Ok(Error::from_contract_error(
+            BlendVaultError::SwapBelowMinimum as u32
+        )))
+    );
+    assert_eq!(vault.claim_emissions(&10), 10);
+}
+
+/// What is returned, supplied and reported is the amount that arrived, not
+/// the amount the router answered with.
+#[test]
+fn test_claim_emissions_returns_what_arrived_not_what_the_router_reports() {
+    let e = Env::default();
+    let vault = vault_with_emissions_and_short_router(&e, 10);
+
+    // The mock reports max(floor, BLND in), far more than the 10 it pays.
+    assert_eq!(vault.claim_emissions(&0), 10);
+}
+
+/// A swap that delivers nothing is refused even with no floor: there is
+/// nothing to supply, and the BLND must not be given away for it.
+#[test]
+fn test_claim_emissions_refuses_a_swap_that_delivers_nothing() {
+    let e = Env::default();
+    let vault = vault_with_emissions_and_short_router(&e, 0);
+
+    assert_eq!(
+        vault.try_claim_emissions(&0).err(),
+        Some(Ok(Error::from_contract_error(
+            BlendVaultError::SwapNoOutput as u32
+        )))
+    );
 }
