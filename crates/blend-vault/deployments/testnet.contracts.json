@@ -3,9 +3,9 @@
   "passphrase": "Test SDF Network ; September 2015",
   "contracts": {
     "blend_vault": {
-      "id": "CAD7K5JW57NSE6CKBXS646D2IUGBYT657L2YRCYR7VEF7GHV4EBALEJ6",
-      "wasm_hash": "e414abf5f800c6e3a81c4e5a96db48e686f30b1df040b9a79cb0b19c8d04627d",
-      "deployed_at": "2026-09-24T17:50:00Z",
+      "id": "CBER44PSDF3X3XTL5LUNRFMQMYHNDMJELEADPCBQDJZXTXKXCGNNMGQG",
+      "wasm_hash": "760fa069a9958db7bfdececf21330c37288b7f376e838bbeec0090e0fc80af1a",
+      "deployed_at": "2026-09-27T21:30:00Z",
       "admin": "GBY3LP4JSZMAQGDAIPJIRF6QKA6MNRIJEFEEK3GNB2GA7W4RERE3II3B",
       "pool": "CCEBVDYM32YNYCVNRXQKDFFPISJJCV557CDZEIRBEE4NCV4KHPQ44HGF",
       "asset": "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC",
@@ -14,15 +14,39 @@
         "name": "Blend XLM Vault",
         "symbol": "bvXLM"
       },
-      "note": "Rebuilt with get_protocol() -> Address replacing get_config() -> (protocol, asset): the one informational view beyond SEP-56, read by the YBC indexer for curation. Vaults are not upgradeable, so this is a fresh deployment. Backs YBC market bvXLM-23DEC2026 (create_market tx ca2d05a4)."
+      "note": "2026-09-27 deployment. Backs YBC market bvXLM-23DEC2026 on factory CCEMLRG3\u2026 (create_market tx f8647111). 10 XLM round trip verified live."
     },
-    "blend_vault_v2_superseded": {
-      "id": "CCWNH24WDHWW6U7LPZ3K2TFLF7IVOKGN6GQMJXUCTYV6Z7AQ6BX7FYGB",
-      "wasm_hash": "1486725ed61cdc8ecf7121b4fa1f7fc06dec65160e0d1389533a9437835d9993",
-      "deployed_at": "2026-07-27T17:48:41Z",
-      "note": "Pre-workspace build with the hand-rolled share token (self-transfer bug, threat model F-2). Still backs the three YBC markets created before 2026-09-24."
+    "blend_usdc_vault": {
+      "id": "CDGRPERNJADDKMY42L2JKX3VVDES6RV7IA7FUBMSFKA2C3NVPRG5IMMA",
+      "wasm_hash": "760fa069a9958db7bfdececf21330c37288b7f376e838bbeec0090e0fc80af1a",
+      "deployed_at": "2026-09-27T22:10:00Z",
+      "admin": "GBY3LP4JSZMAQGDAIPJIRF6QKA6MNRIJEFEEK3GNB2GA7W4RERE3II3B",
+      "pool": "CCEBVDYM32YNYCVNRXQKDFFPISJJCV557CDZEIRBEE4NCV4KHPQ44HGF",
+      "asset": "CAQCFVLOBK5GIULPNZRGATJJMIZL5BSP7X5YJVMGCPTUEPFM4AVSRCJU",
+      "blnd_token": "CB22KRA3YZVCNCQI64JQ5WE7UY2VAV7WFLK6A2JN3HEX56T2EDAFO7QF",
+      "share_token": {
+        "name": "Blend USDC Vault",
+        "symbol": "bvUSDC"
+      },
+      "note": "2026-09-27 deployment on the pool's USDC reserve (USDC:GATALTGT..., Blend's testnet token). Backs YBC market bvUSDC-23DEC2026 (create_market tx 123dd138). 10 USDC round trip verified live."
     },
     "blend_vault_superseded": [
+      {
+        "id": "CAD7K5JW57NSE6CKBXS646D2IUGBYT657L2YRCYR7VEF7GHV4EBALEJ6",
+        "wasm_hash": "e414abf5f800c6e3a81c4e5a96db48e686f30b1df040b9a79cb0b19c8d04627d",
+        "deployed_at": "2026-09-24T17:50:00Z",
+        "admin": "GBY3LP4JSZMAQGDAIPJIRF6QKA6MNRIJEFEEK3GNB2GA7W4RERE3II3B",
+        "pool": "CCEBVDYM32YNYCVNRXQKDFFPISJJCV557CDZEIRBEE4NCV4KHPQ44HGF",
+        "asset": "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC",
+        "blnd_token": "CB22KRA3YZVCNCQI64JQ5WE7UY2VAV7WFLK6A2JN3HEX56T2EDAFO7QF",
+        "share_token": {
+          "name": "Blend XLM Vault",
+          "symbol": "bvXLM"
+        },
+        "note": "Superseded 2026-09-27 by the fresh deployment; predates the threat-model fixes in the tree. Its markets must not be curated. Previous note: Rebuilt with get_protocol() -> Address replacing get_config() -> (protocol, asset): the one informational view beyond SEP-56, read by the YBC indexer for curation. Vaults are not upgradeable, so this is a fresh deployment. Backs YBC market bvXLM-23DEC2026 (create_market tx ca2d05a4).",
+        "superseded_on": "2026-09-27",
+        "superseded_by": "CBER44PSDF3X3XTL5LUNRFMQMYHNDMJELEADPCBQDJZXTXKXCGNNMGQG"
+      },
       {
         "id": "CDZ7BFDTINFUNXSL2NNP7JGDKIXNGUFDYXTBVZSF72VRK5Z5VMWZYDFD",
         "wasm_hash": "15a8e5355f1982aa2eb8acaf2f6c7257fc05edc27d85e20191c32dfbbd4a9976",
@@ -39,6 +63,12 @@
         "superseded_on": "2026-09-24",
         "superseded_by": "CAD7K5JW57NSE6CKBXS646D2IUGBYT657L2YRCYR7VEF7GHV4EBALEJ6"
       }
-    ]
+    ],
+    "blend_vault_v2_superseded": {
+      "id": "CCWNH24WDHWW6U7LPZ3K2TFLF7IVOKGN6GQMJXUCTYV6Z7AQ6BX7FYGB",
+      "wasm_hash": "1486725ed61cdc8ecf7121b4fa1f7fc06dec65160e0d1389533a9437835d9993",
+      "deployed_at": "2026-07-27T17:48:41Z",
+      "note": "Pre-workspace build with the hand-rolled share token (self-transfer bug, threat model F-2). Still backs the three YBC markets created before 2026-09-24."
+    }
   }
 }

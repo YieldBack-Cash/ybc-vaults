@@ -3,9 +3,9 @@
   "passphrase": "Test SDF Network ; September 2015",
   "contracts": {
     "xoxno_vault": {
-      "id": "CDWPBNNTZRIIHVU42NEC2EQ5PDDQAAU7KAKI5A7BUV2WAC7X7W3S363W",
-      "wasm_hash": "be8f61313954c15d189d8f4e199c1071a138fb93bb830c212b0d751fbc1718ff",
-      "deployed_at": "2026-09-24T17:50:00Z",
+      "id": "CBTT626VI6YJJWKMKHLV4IGDLAKZWFZ7IXGTCA2EZY2K26P2ORG7A3WM",
+      "wasm_hash": "70e5d47a1b2b54298f46caf68346b9de9a9958c4aed0b146eb43d431d704a046",
+      "deployed_at": "2026-09-27T21:30:00Z",
       "admin": "GBY3LP4JSZMAQGDAIPJIRF6QKA6MNRIJEFEEK3GNB2GA7W4RERE3II3B",
       "controller": "CCXRWJ6SIU2WPFEGLFGJVITPL57QAYIMIO6OAM2NBGNDQSSCK2FFV3F3",
       "asset": "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC",
@@ -15,9 +15,41 @@
         "name": "XOXNO XLM Vault",
         "symbol": "xvXLM"
       },
-      "note": "Rebuilt with get_protocol() -> Address replacing get_config() -> (protocol, asset): the one informational view beyond SEP-56, read by the YBC indexer for curation. Vaults are not upgradeable, so this is a fresh deployment. Backs YBC market xvXLM-23DEC2026 (create_market tx a437b139)."
+      "note": "2026-09-27 deployment. Backs YBC market xvXLM-23DEC2026 on factory CCEMLRG3\u2026 (create_market tx 7ffd1ea6). 10 XLM round trip verified live."
+    },
+    "xoxno_usdc_vault": {
+      "id": "CC4JJ356JKMY2WHND3JDGFGVASH4736GFYI364EXGWHW26DHTPVH7GXL",
+      "wasm_hash": "70e5d47a1b2b54298f46caf68346b9de9a9958c4aed0b146eb43d431d704a046",
+      "deployed_at": "2026-09-27T22:10:00Z",
+      "admin": "GBY3LP4JSZMAQGDAIPJIRF6QKA6MNRIJEFEEK3GNB2GA7W4RERE3II3B",
+      "controller": "CCXRWJ6SIU2WPFEGLFGJVITPL57QAYIMIO6OAM2NBGNDQSSCK2FFV3F3",
+      "asset": "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
+      "hub_id": 1,
+      "spoke_id": 1,
+      "share_token": {
+        "name": "XOXNO USDC Vault",
+        "symbol": "xvUSDC"
+      },
+      "note": "2026-09-27 deployment on hub 1 / spoke 1 Circle testnet USDC (USDC:GBBD47IF..., supply cap 10,000). Backs YBC market xvUSDC-23DEC2026 (create_market tx 7d77c253). Previews verified; no live deposit yet (admin holds no Circle testnet USDC)."
     },
     "xoxno_vault_superseded": [
+      {
+        "id": "CDWPBNNTZRIIHVU42NEC2EQ5PDDQAAU7KAKI5A7BUV2WAC7X7W3S363W",
+        "wasm_hash": "be8f61313954c15d189d8f4e199c1071a138fb93bb830c212b0d751fbc1718ff",
+        "deployed_at": "2026-09-24T17:50:00Z",
+        "admin": "GBY3LP4JSZMAQGDAIPJIRF6QKA6MNRIJEFEEK3GNB2GA7W4RERE3II3B",
+        "controller": "CCXRWJ6SIU2WPFEGLFGJVITPL57QAYIMIO6OAM2NBGNDQSSCK2FFV3F3",
+        "asset": "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC",
+        "hub_id": 1,
+        "spoke_id": 1,
+        "share_token": {
+          "name": "XOXNO XLM Vault",
+          "symbol": "xvXLM"
+        },
+        "note": "Superseded 2026-09-27 by the fresh deployment; predates the threat-model fixes in the tree. Its markets must not be curated. Previous note: Rebuilt with get_protocol() -> Address replacing get_config() -> (protocol, asset): the one informational view beyond SEP-56, read by the YBC indexer for curation. Vaults are not upgradeable, so this is a fresh deployment. Backs YBC market xvXLM-23DEC2026 (create_market tx a437b139).",
+        "superseded_on": "2026-09-27",
+        "superseded_by": "CBTT626VI6YJJWKMKHLV4IGDLAKZWFZ7IXGTCA2EZY2K26P2ORG7A3WM"
+      },
       {
         "id": "CCJIXIZFO4V5GA4WX6JOZFALCZVPJVUG4ZCI3BWX3NKQFK5LFH2ZQEWG",
         "wasm_hash": "9dd4924d5952b44780459c856f5f1dace99bfe16b9bae328f1702caec65c4fca",
