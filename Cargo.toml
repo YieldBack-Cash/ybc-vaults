@@ -7,6 +7,9 @@ members = [
   "crates/xoxno-vault",
 ]
 
+[workspace.package]
+license = "GPL-3.0-only"
+
 [workspace.dependencies]
 # Must match ybc-contracts: a mismatched SDK makes Env/Address incompatible
 # across the call boundary in any test that links both. 26.1 is the newest

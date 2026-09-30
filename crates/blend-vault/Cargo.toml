@@ -2,7 +2,7 @@
 name = "blend-vault"
 version = "2.0.0"
 authors = ["Script3 Ltd. <gm@script3.io>", "YieldBack.Cash"]
-license = "AGPL-3.0"
+license.workspace = true
 edition = "2021"
 publish = false
 description = "SEP-56 tokenized vault over a Blend pool supply position, for YBC PT/YT markets"

@@ -6,6 +6,9 @@ position on Stellar Soroban, built to back YBC PT/YT markets.
 Forked from Script3's `fee-vault-v2` and carried in this workspace with its
 history. The fee modes, signer gate and hand-rolled share token that fork had
 are gone; the bToken ratio maths and its property tests are theirs and stay.
+That original `fee-vault-v2` code is MIT under Script3's copyright, preserved
+in `LICENSE-MIT-Script3`; everything else in this crate is GPL-3.0 under the
+workspace's root `LICENSE.md`.
 
 ## The idea in one paragraph
 
@@ -67,7 +70,7 @@ here on a real Blend pool.
 
 This crate owns the pool client (`pool.rs`, generated from the vendored
 `wasm/blend/pool.wasm`), the ratio maths (`vault.rs`), emissions harvesting
-(`swap.rs`, `claim_emissions`), and its own errors (`200`–`206`; shared codes
+(`swap.rs`, `claim_emissions`), and its own errors (`200`–`207`; shared codes
 are 10–49, OpenZeppelin's 100–199).
 
 ## Build and test
@@ -109,5 +112,9 @@ holder's `max_withdraw` immediately (`tests/test_default.rs`). The consumer's
 high-water mark decides how to treat it; the vault's job is to tell the truth.
 
 **`claim_emissions` is unprivileged.** Its `amount_out_min` is caller-chosen,
-so a caller passing 0 accepts whatever the Soroswap leg returns. Flagged in
-the YBC threat model.
+so a caller passing 0 accepts whatever the Soroswap leg delivers. The floor
+itself is enforced by the vault, against the asset balance it measures either
+side of the swap (`SwapBelowMinimum`, 207), not by the router and not from
+the figure the router reports; a swap that delivers nothing is refused
+whatever the floor (`SwapNoOutput`, 206). Who may call it, and with what
+floor, is still flagged in the YBC threat model.
