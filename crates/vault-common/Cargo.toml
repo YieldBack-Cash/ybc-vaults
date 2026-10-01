@@ -1,6 +1,6 @@
 [package]
 name = "vault-common"
-version = "0.1.0"
+version = "0.1.2"
 license.workspace = true
 edition = "2021"
 description = "Protocol-independent layer shared by every YBC SEP-56 vault adapter"

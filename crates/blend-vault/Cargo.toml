@@ -1,6 +1,6 @@
 [package]
 name = "blend-vault"
-version = "2.0.0"
+version = "0.1.2"
 authors = ["Script3 Ltd. <gm@script3.io>", "YieldBack.Cash"]
 license = "GPL-3.0-only AND MIT"
 edition = "2021"

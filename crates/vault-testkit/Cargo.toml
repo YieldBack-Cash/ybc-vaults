@@ -1,6 +1,6 @@
 [package]
 name = "vault-testkit"
-version = "0.1.0"
+version = "0.1.2"
 license.workspace = true
 edition = "2021"
 description = "Conformance suite every YBC vault adapter must pass"

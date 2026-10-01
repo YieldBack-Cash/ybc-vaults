@@ -1,6 +1,6 @@
 [package]
 name = "xoxno-vault"
-version = "0.2.0"
+version = "0.1.2"
 license.workspace = true
 edition = "2021"
 description = "SEP-56 tokenized vault over a XOXNO lending position, for YBC PT/YT markets"
