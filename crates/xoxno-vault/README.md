@@ -116,13 +116,15 @@ The share token (OpenZeppelin `Base`), the SEP-56 declaration
 `max_withdraw` and `max_mint`, and compile-checks the rest), the
 operator-allowance rule on `redeem` and `withdraw`, the positive-amount guard,
 the TTL policy, the `Deposit`/`Withdraw` events and the widening multiply come
-from `vault-common`. The `tests/conformance.rs` file binds this crate's fixture
+from `vault-common`. `src/tests/conformance.rs` binds this crate's fixture
 to `vault-testkit`, which runs the same 36 properties against every adapter.
 
 This crate owns only what is XOXNO's: the `lending/` mirror of
 `xoxno-contract-sdk` (see below), the account-id sentinel, the index maths
-(`vault.rs`), the
-`max_deposit`/`total_assets` views, and the four XOXNO-specific errors
+(`vault.rs`), the `max_deposit`, `withdraw_limit`, `total_assets`,
+`account_id` and `config` views (`max_withdraw` and `max_redeem` are capped by
+`withdraw_limit`: the pool's cash, and 0 while the market is paused or
+frozen), and the four XOXNO-specific errors
 (`ZeroAssetRedeem = 300`, `NoAccount = 301`, `UnsupportedDecimals = 302`,
 `MintShortfall = 303`; shared codes are 10–49, OpenZeppelin's are 100–199).
 The mock controller the tests run on lives in

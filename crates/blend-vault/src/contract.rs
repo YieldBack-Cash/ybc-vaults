@@ -22,7 +22,8 @@ pub struct BlendVault;
 vault_common::impl_share_token!(BlendVault);
 
 // The five SEP-56 views a fee-less vault fully determines, and the
-// compile-time check that the twelve below complete the standard.
+// compile-time check that the eleven SEP-56 functions below, plus
+// `withdraw_limit`, complete the standard.
 vault_common::impl_sep56!(BlendVault);
 
 #[contractimpl]
@@ -113,19 +114,36 @@ impl BlendVault {
     pub fn max_deposit(e: &Env, _receiver: Address) -> i128 {
         let pool = storage::get_pool(e);
         let asset = storage::get_asset(e);
-        if pool::status(e, &pool) >= 4 {
+        if pool::status(e, &pool) >= pool::STATUS_FROZEN {
             return 0;
         }
         let reserve = pool::reserve(e, &pool, &asset);
         if !reserve.config.enabled {
             return 0;
         }
-        let supplied = mul_div_floor(e, reserve.data.b_supply, reserve.data.b_rate, SCALAR_12);
+        let supplied = pool::reserve_supplied(e, &reserve);
         if reserve.config.supply_cap <= supplied {
             0
         } else {
             reserve.config.supply_cap - supplied
         }
+    }
+
+    /// The most underlying the pool could pay a withdrawer right now: what its
+    /// suppliers put in less what its borrowers took out. Blend lets suppliers
+    /// withdraw whatever the pool's status; a supplier asking for more than
+    /// the cash on hand waits for repayments. `max_withdraw` and `max_redeem`
+    /// are capped by this. It ignores the reserve's `max_util` check, which
+    /// Blend applies to withdrawals as well, so it can overstate when
+    /// utilisation is already near that cap.
+    pub fn withdraw_limit(e: &Env) -> i128 {
+        let pool = storage::get_pool(e);
+        let asset = storage::get_asset(e);
+        let reserve = pool::reserve(e, &pool, &asset);
+        // Floor what is supplied, ceil what is owed: the limit itself rounds down.
+        let supplied = pool::reserve_supplied(e, &reserve);
+        let borrowed = mul_div_ceil(e, reserve.data.d_supply, reserve.data.d_rate, SCALAR_12);
+        (supplied - borrowed).max(0)
     }
 
     /// Supplies `assets` from `from` into the pool and mints the resulting

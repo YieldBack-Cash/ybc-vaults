@@ -35,11 +35,13 @@ and compares WASM hashes, and toolchain drift changes the hash.
 2. `#[contract] pub struct MyVault;` then `vault_common::impl_share_token!(MyVault);`
    for SEP-41 and `vault_common::impl_sep56!(MyVault);` for SEP-56. Set
    metadata with 7 decimals in the constructor.
-3. The twelve SEP-56 functions that depend on the protocol (`query_asset`,
+3. The eleven SEP-56 functions that depend on the protocol (`query_asset`,
    `total_assets`, the two conversions, `max_deposit`, `preview_mint`,
    `preview_withdraw`, `deposit`, `mint`, `withdraw`, `redeem`), each taking
-   `e: &Env`. `impl_sep56!` supplies the other five and refuses to compile
-   until all twelve are there with the standard's signatures. Call
+   `e: &Env`, plus `withdraw_limit(e) -> i128`: the most the protocol can pay
+   out right now (0 while halted), which caps `max_withdraw` and `max_redeem`.
+   `impl_sep56!` supplies the other five and refuses to compile until all are
+   there with the standard's signatures. Call
    `vault_common::guard::require_positive` first,
    `vault_common::auth::spend_operator_allowance` on a delegated exit, and
    `Base::mint` / `Base::update` for the ledger. Own the rate math in your crate.

@@ -44,17 +44,19 @@ pub trait Sep56Vault {
 
 /// Completes and checks an adapter's SEP-56 surface.
 ///
-/// The adapter writes the twelve functions that depend on its protocol:
-/// `query_asset`, `total_assets`, the two conversions, `max_deposit`,
-/// `preview_mint`, `preview_withdraw`, and the four flows. This macro then:
+/// The adapter writes the eleven SEP-56 functions that depend on its
+/// protocol (`query_asset`, `total_assets`, the two conversions,
+/// `max_deposit`, `preview_mint`, `preview_withdraw`, and the four flows)
+/// plus `withdraw_limit` (below). This macro then:
 ///
 /// 1. **emits the five views the standard fully determines** for a vault
 ///    with no fees, in a second `#[contractimpl]` block on the adapter:
 ///    `preview_deposit` is `convert_to_shares`, `preview_redeem` is
-///    `convert_to_assets`, `max_redeem` is the owner's share balance,
-///    `max_withdraw` is that balance converted, and `max_mint` is
-///    `max_deposit` converted. An adapter that ever charged a fee would
-///    write these itself instead of invoking the macro;
+///    `convert_to_assets`, `max_redeem` is the owner's share balance and
+///    `max_withdraw` its value, both capped by the adapter's
+///    `withdraw_limit`, and `max_mint` is `max_deposit` converted. An
+///    adapter that ever charged a fee would write these itself instead of
+///    invoking the macro;
 /// 2. **implements [`Sep56Vault`]** for the adapter by forwarding every
 ///    function to the inherent one, so the build fails at the adapter the
 ///    moment a function is missing or its signature drifts from the standard.
@@ -69,6 +71,14 @@ pub trait Sep56Vault {
 /// vault_common::impl_share_token!(MyVault);
 /// vault_common::impl_sep56!(MyVault);
 /// ```
+///
+/// Besides the eleven SEP-56 functions it forwards to, the adapter must
+/// define `withdraw_limit(e) -> i128`: the most underlying the protocol
+/// could pay out to anyone right now (its free liquidity, or zero while it
+/// is halted). `max_withdraw` and `max_redeem` are capped by it. It is a
+/// snapshot of liquidity shared with every other supplier, not a
+/// reservation: another exit can consume it first, so it sizes a request
+/// and guarantees nothing.
 #[macro_export]
 macro_rules! impl_sep56 {
     ($contract:ident) => {
@@ -92,14 +102,24 @@ macro_rules! impl_sep56 {
                     Self::convert_to_assets(e, shares)
                 }
 
-                /// The owner's share balance: every share can be redeemed.
+                /// The owner's shares, capped at the shares whose value the
+                /// protocol can pay out right now (`withdraw_limit`). Under the
+                /// cap, redeeming this many pays no more than the limit.
                 pub fn max_redeem(e: &Env, owner: Address) -> i128 {
-                    Base::balance(e, &owner)
+                    let balance = Base::balance(e, &owner);
+                    let limit = Self::withdraw_limit(e);
+                    if Self::convert_to_assets(e, balance) <= limit {
+                        balance
+                    } else {
+                        Self::convert_to_shares(e, limit).min(balance)
+                    }
                 }
 
-                /// What `owner` could redeem right now, in assets.
+                /// What `owner` could redeem right now, in assets: the value of
+                /// their shares, capped by what the protocol can pay out.
                 pub fn max_withdraw(e: &Env, owner: Address) -> i128 {
                     Self::convert_to_assets(e, Base::balance(e, &owner))
+                        .min(Self::withdraw_limit(e))
                 }
 
                 /// `max_deposit` in shares, floored.

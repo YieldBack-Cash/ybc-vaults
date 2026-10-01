@@ -256,3 +256,46 @@ fn test_set_admin() {
         ]
     );
 }
+
+/// The exit limits stop at the pool's cash on hand. With nothing borrowed
+/// they are the holder's whole position; once borrowers hold most of it,
+/// `max_withdraw` is the free liquidity and `max_redeem` the shares that
+/// liquidity pays for.
+#[test]
+fn test_exit_limits_are_capped_by_pool_liquidity() {
+    let e = Env::default();
+    e.mock_all_auths();
+    let admin = Address::generate(&e);
+    let samwise = Address::generate(&e);
+    let frodo = Address::generate(&e);
+    let (vault_address, vault_client, pool_client) = setup(&e, &admin);
+    seed_vault_positions(&e, &vault_address, &samwise, &frodo);
+
+    // Ample liquidity: the limits are the position itself.
+    let frodo_shares = vault_client.balance(&frodo);
+    let frodo_value = vault_client.convert_to_assets(&frodo_shares);
+    assert_eq!(vault_client.max_redeem(&frodo), frodo_shares);
+    assert_eq!(vault_client.max_withdraw(&frodo), frodo_value);
+
+    // The reserve has 1000 bTokens supplied and 800 worth borrowed at rate
+    // 1.0: 200 of underlying is all anyone can take out.
+    pool_client.set_utilization(&1000_0000000, &800_0000000, &1_000_000_000_000);
+    let liquidity = 200_0000000;
+    assert_eq!(vault_client.withdraw_limit(), liquidity);
+    assert_eq!(vault_client.max_withdraw(&frodo), liquidity);
+    assert_eq!(
+        vault_client.max_redeem(&frodo),
+        vault_client.convert_to_shares(&liquidity)
+    );
+    assert!(vault_client.convert_to_assets(&vault_client.max_redeem(&frodo)) <= liquidity);
+
+    // A holder whose whole position fits under the cap is unaffected.
+    let samwise_shares = vault_client.balance(&samwise);
+    assert!(vault_client.convert_to_assets(&samwise_shares) < liquidity);
+    assert_eq!(vault_client.max_redeem(&samwise), samwise_shares);
+
+    // Fully borrowed: nothing can leave.
+    pool_client.set_utilization(&1000_0000000, &1000_0000000, &1_000_000_000_000);
+    assert_eq!(vault_client.max_withdraw(&frodo), 0);
+    assert_eq!(vault_client.max_redeem(&frodo), 0);
+}

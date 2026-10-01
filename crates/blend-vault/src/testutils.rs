@@ -420,6 +420,8 @@ pub mod mockpool {
     #[contract]
     pub struct MockPool;
 
+    const UTIL: &str = "util";
+
     #[contractimpl]
     impl MockPool {
         /// Set the reserve b_rate.
@@ -427,10 +429,31 @@ pub mod mockpool {
             e.storage().instance().set(&BRATE, &b_rate);
         }
 
-        /// Only `b_rate` is real; the rest of the reserve is defaulted.
+        /// Set what the reserve has been lent (`b_supply`) and borrowed
+        /// (`d_supply` at `d_rate`); the difference is what `withdraw_limit`
+        /// sees as cash on hand.
+        pub fn set_utilization(e: Env, b_supply: i128, d_supply: i128, d_rate: i128) {
+            e.storage()
+                .instance()
+                .set(&UTIL, &(b_supply, d_supply, d_rate));
+        }
+
+        /// Only `b_rate` and the utilisation are real; the rest of the reserve
+        /// is defaulted. Unset, the reserve holds a billion tokens and has lent
+        /// none, so nothing here caps a withdrawal.
         pub fn get_reserve(e: Env, reserve: Address) -> Reserve {
-            let mut data = ReserveData::default();
-            data.b_rate = e.storage().instance().get(&BRATE).unwrap_or(0);
+            let (b_supply, d_supply, d_rate): (i128, i128, i128) = e
+                .storage()
+                .instance()
+                .get(&UTIL)
+                .unwrap_or((1_000_000_000_0000000, 0, 0));
+            let data = ReserveData {
+                b_rate: e.storage().instance().get(&BRATE).unwrap_or(0),
+                b_supply,
+                d_supply,
+                d_rate,
+                ..ReserveData::default()
+            };
             Reserve {
                 asset: reserve,
                 config: ReserveConfig::default(),

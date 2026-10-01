@@ -23,7 +23,8 @@ pub struct XoxnoVault;
 vault_common::impl_share_token!(XoxnoVault);
 
 // The five SEP-56 views a fee-less vault fully determines, and the
-// compile-time check that the twelve below complete the standard.
+// compile-time check that the eleven SEP-56 functions below, plus
+// `withdraw_limit`, complete the standard.
 vault_common::impl_sep56!(XoxnoVault);
 
 fn hub_asset(cfg: &Config) -> HubAssetKey {
@@ -249,6 +250,21 @@ impl XoxnoVault {
     }
 
     // ── SEP-56: deposit ─────────────────────────────────────────────────────
+
+    /// The most underlying the controller could pay a withdrawer right now:
+    /// the cash its liquidity pool holds. Zero while the market is paused or
+    /// frozen, as `max_deposit` reports; the controller's interface does not
+    /// say which of the two halts withdrawals, so this errs toward the lower
+    /// figure. `max_withdraw` and `max_redeem` are capped by this.
+    pub fn withdraw_limit(e: &Env) -> i128 {
+        let cfg = storage::get_config(e);
+        let controller = ControllerClient::new(e, &cfg.controller);
+        let spoke_asset = controller.get_spoke_asset(&cfg.spoke_id, &hub_asset(&cfg));
+        if spoke_asset.paused || spoke_asset.frozen {
+            return 0;
+        }
+        TokenClient::new(e, &cfg.asset).balance(&cfg.pool)
+    }
 
     /// Remaining room under the spoke's supply cap, in assets.
     ///

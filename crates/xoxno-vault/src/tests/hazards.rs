@@ -146,3 +146,29 @@ fn max_deposit_is_zero_rather_than_negative_past_the_cap() {
     assert_eq!(f.vault.max_deposit(&f.user), 0);
 }
 
+/// The exit limits see the market's state and its cash, as `max_deposit`
+/// does: nothing can be taken out of a paused market, and no more than the
+/// controller's pool holds out of a live one.
+#[test]
+fn exit_limits_are_zero_when_paused_and_capped_by_pool_cash() {
+    let f = VaultFixture::new();
+    let deposit = 1_000_0000000;
+    f.vault.deposit(&deposit, &f.user, &f.user, &f.user);
+    let shares = f.vault.balance(&f.user);
+
+    // Live: the pool holds the deposit, so the whole position is redeemable.
+    assert_eq!(
+        f.vault.withdraw_limit(),
+        f.token.balance(&f.controller_address)
+    );
+    assert_eq!(f.vault.max_redeem(&f.user), shares);
+    assert_eq!(
+        f.vault.max_withdraw(&f.user),
+        f.vault.convert_to_assets(&shares)
+    );
+
+    f.controller.set_paused(&true);
+    assert_eq!(f.vault.withdraw_limit(), 0);
+    assert_eq!(f.vault.max_withdraw(&f.user), 0);
+    assert_eq!(f.vault.max_redeem(&f.user), 0);
+}

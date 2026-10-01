@@ -1,7 +1,18 @@
-//! The six calls the vault makes into its Blend pool.
+//! The vault's calls into its Blend pool.
 
 use crate::blend::pool::{Client as PoolClient, Request, Reserve};
+use crate::constants::SCALAR_12;
 use soroban_sdk::{vec, Address, Env, Vec};
+use vault_common::math::mul_div_floor;
+
+/// Pool status at or above which supplying is refused (Blend's "frozen").
+pub const STATUS_FROZEN: u32 = 4;
+
+/// Underlying the reserve's suppliers have put in, at the current bRate,
+/// floored.
+pub fn reserve_supplied(e: &Env, reserve: &Reserve) -> i128 {
+    mul_div_floor(e, reserve.data.b_supply, reserve.data.b_rate, SCALAR_12)
+}
 
 /// Supplies `amount` of `reserve` into the pool on behalf of the vault. The
 /// tokens are pulled from `from`, who must have authorized the transfer.
