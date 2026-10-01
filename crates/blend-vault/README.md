@@ -44,18 +44,24 @@ surface on the same address. YBC itself calls only `query_asset`,
 `convert_to_assets`, `deposit` and `redeem`. There are no fees, so every
 `preview_*` equals the matching conversion with the standard's rounding:
 `deposit` and `redeem` round down, `mint` and `withdraw` round up, and every
-rounding falls in the vault's favour (`tests/conformance.rs`).
+rounding falls in the vault's favour (`src/tests/conformance.rs`).
+
+`max_withdraw` and `max_redeem` are additionally capped by `withdraw_limit()`:
+the reserve's supplied value less its borrowed value, the most the pool can pay
+right now. It is a snapshot of liquidity shared with every supplier, not a
+reservation.
 
 Beyond the standard: `get_protocol() -> Address` (the Blend pool), the one
 view every adapter in this workspace exposes; it is informational, read by the
 YBC indexer so a curator can confirm the protocol behind a vault, and nothing
-on chain calls it. Blend-specific views are `get_vault` (the ratio state) and
-`get_b_tokens`.
+on chain calls it. Blend-specific views are `get_vault` (the ratio state),
+`get_b_tokens` and `withdraw_limit`.
 
-Operations: `set_admin`, `set_router` (admin) and `claim_emissions` (anyone;
-the caller sets the swap's slippage floor). Rewards are protocol yield:
-`claim_emissions` swaps BLND into the underlying and supplies it back, so
-there is no admin token-rescue function and nothing an admin can move.
+Operations, all admin: `set_admin`, `set_router`, `set_swap_path` and
+`claim_emissions` (the admin sets the swap's slippage floor). Rewards are
+protocol yield: `claim_emissions` swaps BLND into the underlying and supplies
+it back, so there is no admin token-rescue function and nothing an admin can
+move out of the vault.
 
 ## What is shared and what is Blend's
 
@@ -64,13 +70,13 @@ The share token (OpenZeppelin `Base`), the SEP-56 declaration
 `max_withdraw` and `max_mint`, and compile-checks the rest), the
 operator-allowance rule on `redeem` and `withdraw`, the positive-amount guard,
 the TTL policy, the `Deposit`/`Withdraw` events and the widening multiply come
-from `vault-common`. `tests/conformance.rs` binds this crate's fixture to
+from `vault-common`. `src/tests/conformance.rs` binds this crate's fixture to
 `vault-testkit`, which runs the same 36 properties against every adapter,
 here on a real Blend pool.
 
 This crate owns the pool client (`pool.rs`, generated from the vendored
 `wasm/blend/pool.wasm`), the ratio maths (`vault.rs`), emissions harvesting
-(`swap.rs`, `claim_emissions`), and its own errors (`200`–`207`; shared codes
+(`swap.rs`, `claim_emissions`), and its own errors (`200`–`208`; shared codes
 are 10–49, OpenZeppelin's 100–199).
 
 ## Build and test
@@ -97,24 +103,34 @@ stellar contract deploy --wasm target/wasm32v1-none/release/blend_vault.wasm \
      --name "Blend USDC Vault" --symbol bvUSDC
 ```
 
-Then `set_router <SOROSWAP_ROUTER>` before the first `claim_emissions`.
+Then `set_router <SOROSWAP_ROUTER>` before the first `claim_emissions`, and
+`set_swap_path` if the harvest should route through an intermediate asset
+(for an XLM vault, `[BLND, USDC, XLM]` where the BLND:USDC pool is deepest).
 
 ## Notes for anyone extending this
 
 **Redeem accounting uses the pool's rounding.** Blend rounds the bTokens it
 burns *up* from the underlying requested, so `redeem` recomputes
 `underlying_to_b_tokens_up` before debiting `total_b_tokens`, or the vault's
-figure drifts above the real position. `tests/test_redeem.rs` pins this
-against the pool.
+figure drifts above the real position. The `test_redeem*` cases and
+`deposit_then_full_redeem_never_profits` in `src/vault.rs`, and
+`src/tests/test_happy_path.rs`, pin this against the pool.
 
 **A default is reported, not hidden.** A falling `b_rate` lowers every
-holder's `max_withdraw` immediately (`tests/test_default.rs`). The consumer's
+holder's `max_withdraw` immediately (`src/tests/test_default.rs`). The consumer's
 high-water mark decides how to treat it; the vault's job is to tell the truth.
 
-**`claim_emissions` is unprivileged.** Its `amount_out_min` is caller-chosen,
-so a caller passing 0 accepts whatever the Soroswap leg delivers. The floor
-itself is enforced by the vault, against the asset balance it measures either
-side of the swap (`SwapBelowMinimum`, 207), not by the router and not from
-the figure the router reports; a swap that delivers nothing is refused
-whatever the floor (`SwapNoOutput`, 206). Who may call it, and with what
-floor, is still flagged in the YBC threat model.
+**`claim_emissions` is admin-only.** There is no on-chain price for BLND
+(none of Reflector, Pyth, Band or DIA publishes one), so a fair floor cannot
+be derived on chain and has to come from a party the vault trusts; the admin
+already picks the router. An open call with a caller-chosen floor would let
+anyone move the BLND price, harvest at floor zero and move it back, taking
+that harvest's yield. The floor the admin passes is enforced by the vault
+against the asset balance it measures either side of the swap
+(`SwapBelowMinimum`, 207), not by the router and not from the figure the
+router reports; a swap that delivers nothing is refused whatever the floor
+(`SwapNoOutput`, 206). The BLND leaves the vault by a `transfer` the router
+makes from the vault to the first pair, which the vault authorises for that
+one call (`vault_common::auth::authorize_transfer_as_current`); an allowance
+would cover only `transfer_from`, which the router never uses. The route is
+`set_swap_path`, checked to start at BLND and end at the underlying.

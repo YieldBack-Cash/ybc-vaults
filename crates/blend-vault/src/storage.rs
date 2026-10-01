@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, panic_with_error, Address, Env, IntoVal, TryFromVal, Val};
+use soroban_sdk::{contracttype, panic_with_error, Address, Env, IntoVal, TryFromVal, Val, Vec};
 use vault_common::VaultError;
 
 use crate::vault::VaultData;
@@ -16,12 +16,16 @@ pub enum DataKey {
     Pool,
     /// The reserve asset (instance).
     Asset,
-    /// Authorized for `set_admin` and `set_router` (instance).
+    /// Authorized for `set_admin`, `set_router`, `set_swap_path` and
+    /// `claim_emissions` (instance).
     Admin,
     /// The BLND token, for emissions harvesting (instance).
     BlndToken,
     /// The Soroswap router for harvesting; absent until `set_router` (instance).
     Router,
+    /// The token route the harvest sells BLND along; absent means the
+    /// direct BLND → underlying pair (instance).
+    SwapPath,
     /// The share/bToken ratio state (persistent).
     Vault,
 }
@@ -89,6 +93,15 @@ pub fn get_router(e: &Env) -> Option<Address> {
 
 pub fn set_router(e: &Env, router: &Address) {
     set_instance(e, DataKey::Router, router);
+}
+
+/// The harvest's swap route, or `None` for the direct pair.
+pub fn get_swap_path(e: &Env) -> Option<Vec<Address>> {
+    e.storage().instance().get(&DataKey::SwapPath)
+}
+
+pub fn set_swap_path(e: &Env, path: &Vec<Address>) {
+    set_instance(e, DataKey::SwapPath, path);
 }
 
 //---------- Persistent ----------//

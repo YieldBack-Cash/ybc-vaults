@@ -29,4 +29,7 @@ pub enum BlendVaultError {
     /// The swap delivered less of the asset than `amount_out_min`, measured
     /// on the vault's own balance.
     SwapBelowMinimum = 207,
+    /// A swap path that does not start at BLND, does not end at the
+    /// underlying, or has fewer than two entries.
+    SwapPathInvalid = 208,
 }

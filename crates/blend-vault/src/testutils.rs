@@ -278,6 +278,11 @@ impl vault_testkit::ConformanceFixture for BlendConformanceFixture {
 
 /// Mock Soroswap router for claim_emissions integration tests.
 /// Performs a 1:1 swap of token_in → token_out from its pre-funded balance.
+///
+/// It takes the input exactly as Soroswap's router does: `to.require_auth()`,
+/// then a `transfer` from `to` to the pair (here, itself), inside the swap.
+/// The vault has to have authorised that call; a test that enforces
+/// authorisation fails here if it has not.
 pub mod mocksoroswap {
     use soroban_sdk::{contract, contractimpl, token::TokenClient, Address, Env, Vec};
 
@@ -286,6 +291,10 @@ pub mod mocksoroswap {
 
     #[contractimpl]
     impl MockSoroswapRouter {
+        pub fn router_pair_for(e: Env, _token_a: Address, _token_b: Address) -> Address {
+            e.current_contract_address()
+        }
+
         pub fn swap_exact_tokens_for_tokens(
             e: Env,
             amount_in: i128,
@@ -294,12 +303,12 @@ pub mod mocksoroswap {
             to: Address,
             _deadline: u64,
         ) -> Vec<i128> {
-            let token_out = path.get(1).unwrap();
-            TokenClient::new(&e, &token_out).transfer(
-                &e.current_contract_address(),
-                &to,
-                &amount_in,
-            );
+            to.require_auth();
+            let me = e.current_contract_address();
+            let token_in = path.get(0).unwrap();
+            let token_out = path.last().unwrap();
+            TokenClient::new(&e, &token_in).transfer(&to, &me, &amount_in);
+            TokenClient::new(&e, &token_out).transfer(&me, &to, &amount_in);
             soroban_sdk::vec![&e, amount_in, amount_in]
         }
     }
@@ -324,7 +333,13 @@ pub mod mockshortrouter {
     #[contractimpl]
     impl MockShortRouter {
         pub fn __constructor(e: Env, payout: i128) {
-            e.storage().instance().set(&symbol_short!("payout"), &payout);
+            e.storage()
+                .instance()
+                .set(&symbol_short!("payout"), &payout);
+        }
+
+        pub fn router_pair_for(e: Env, _token_a: Address, _token_b: Address) -> Address {
+            e.current_contract_address()
         }
 
         pub fn swap_exact_tokens_for_tokens(
@@ -335,12 +350,17 @@ pub mod mockshortrouter {
             to: Address,
             _deadline: u64,
         ) -> Vec<i128> {
+            to.require_auth();
             let router = e.current_contract_address();
             let token_in = path.get(0).unwrap();
-            let token_out = path.get(1).unwrap();
-            TokenClient::new(&e, &token_in).transfer_from(&router, &to, &router, &amount_in);
+            let token_out = path.last().unwrap();
+            TokenClient::new(&e, &token_in).transfer(&to, &router, &amount_in);
 
-            let payout: i128 = e.storage().instance().get(&symbol_short!("payout")).unwrap();
+            let payout: i128 = e
+                .storage()
+                .instance()
+                .get(&symbol_short!("payout"))
+                .unwrap();
             if payout > 0 {
                 TokenClient::new(&e, &token_out).transfer(&router, &to, &payout);
             }

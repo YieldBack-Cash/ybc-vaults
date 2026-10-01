@@ -1,5 +1,36 @@
-use soroban_sdk::{Address, Env};
+use soroban_sdk::auth::{ContractContext, InvokerContractAuthEntry, SubContractInvocation};
+use soroban_sdk::{symbol_short, vec, Address, Env, IntoVal, Vec};
 use stellar_tokens::fungible::Base;
+
+/// Authorizes one `transfer(from, to, amount)` on `token` inside the very
+/// next call the current contract makes, and no other.
+///
+/// Both lending protocols and the Soroswap router pull tokens from this
+/// contract with a `transfer` nested inside their own entry point, after
+/// `from.require_auth()`. A contract authorizes such a nested call with
+/// `authorize_as_current_contract`, naming the exact call; an allowance would
+/// cover only `transfer_from`, which none of them use. The grant is consumed
+/// by the next contract call whatever it is, so nothing may sit between this
+/// and the call it is meant for: even a balance read would take it.
+pub fn authorize_transfer_as_current(
+    e: &Env,
+    token: &Address,
+    from: &Address,
+    to: &Address,
+    amount: i128,
+) {
+    e.authorize_as_current_contract(vec![
+        e,
+        InvokerContractAuthEntry::Contract(SubContractInvocation {
+            context: ContractContext {
+                contract: token.clone(),
+                fn_name: symbol_short!("transfer"),
+                args: (from.clone(), to.clone(), amount).into_val(e),
+            },
+            sub_invocations: Vec::new(e),
+        }),
+    ]);
+}
 
 /// Authorizes `operator` to burn `shares` of `owner`'s position.
 ///

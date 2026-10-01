@@ -1,14 +1,31 @@
-#![cfg(test)]
-
 use crate::blend::pool::Client as PoolClient;
-use crate::storage::ONE_DAY_LEDGERS;
 use crate::errors::BlendVaultError;
 use crate::testutils::{
     create_blend_pool, mockshortrouter, mocksoroswap, register_blend_vault, setup_pool_util_rate,
     BlendFixture, EnvTestUtils, MockTokenClient,
 };
 use crate::BlendVaultClient;
-use soroban_sdk::{testutils::Address as _, Address, Env, Error};
+use soroban_sdk::{
+    testutils::{Address as _, MockAuth, MockAuthInvoke},
+    vec, Address, Env, Error, IntoVal,
+};
+use vault_testkit::ledger::ONE_DAY_LEDGERS;
+
+/// Signs the next call as `admin` and nothing else: `claim_emissions` is
+/// admin-only, and every other signature it needs is the vault's own,
+/// granted inside the call. With authorisation otherwise enforced, the
+/// router's pull of BLND fails unless the vault authorised exactly that.
+fn as_admin(e: &Env, admin: &Address, vault: &Address, amount_out_min: i128) {
+    e.mock_auths(&[MockAuth {
+        address: admin,
+        invoke: &MockAuthInvoke {
+            contract: vault,
+            fn_name: "claim_emissions",
+            args: (amount_out_min,).into_val(e),
+            sub_invokes: &[],
+        },
+    }]);
+}
 
 /// Full claim_emissions flow using a mock Soroswap router.
 ///
@@ -70,11 +87,7 @@ fn test_claim_emissions_swaps_blnd_for_underlying() {
 
     let b_tokens_before = blend_vault_client.get_vault().total_b_tokens;
 
-    // -- Second emission cycle (create_blend_pool already ran the first/baseline cycle) --
-    // emitter.distribute mints BLND to the backstop for the 7-day elapsed period.
-    // backstop.distribute allocates that to each reward-zone pool's rz_emis.accrued.
-    // pool.gulp_emissions consumes rz_emis.accrued and sets the emission rate (eps) for
-    // the NEXT 7 days: it does NOT give a lump sum; the eps accumulates over time.
+    // Second emission cycle; see the doc comment above.
     e.jump(ONE_DAY_LEDGERS * 7);
     blend_fixture.emitter.distribute();
     blend_fixture.backstop.distribute();
@@ -82,6 +95,9 @@ fn test_claim_emissions_swaps_blnd_for_underlying() {
 
     // Let 3 days of eps accumulate in the pool's emission index before claiming
     e.jump(ONE_DAY_LEDGERS * 3);
+
+    // Real authorisation from here, with only the admin's signature supplied.
+    as_admin(&e, &bombadil, &vault, 0);
 
     // claim_emissions: pool.claim(BLND) → soroswap swap(BLND→USDC) → pool.supply → b_tokens
     let underlying_received = blend_vault_client.claim_emissions(&0);
@@ -151,7 +167,7 @@ fn test_claim_emissions_zero_blnd_returns_zero() {
 /// A vault with a supply position and BLND emissions ready to claim, whose
 /// router pays `payout` of the underlying for any swap and reports the floor
 /// as met.
-fn vault_with_emissions_and_short_router(e: &Env, payout: i128) -> BlendVaultClient<'_> {
+fn vault_with_emissions_and_short_router(e: &Env, payout: i128) -> (BlendVaultClient<'_>, Address) {
     e.cost_estimate().budget().reset_unlimited();
     e.mock_all_auths();
     e.set_default_info();
@@ -194,7 +210,10 @@ fn vault_with_emissions_and_short_router(e: &Env, payout: i128) -> BlendVaultCli
     pool_client.gulp_emissions();
     e.jump(ONE_DAY_LEDGERS * 3);
 
-    blend_vault_client
+    // Authorisation enforced from here; each test signs its claims as the admin.
+    e.set_auths(&[]);
+
+    (blend_vault_client, bombadil)
 }
 
 /// The router takes the BLND, pays ten stroops and says the floor was met.
@@ -202,8 +221,9 @@ fn vault_with_emissions_and_short_router(e: &Env, payout: i128) -> BlendVaultCli
 #[test]
 fn test_claim_emissions_enforces_the_floor_on_what_arrived() {
     let e = Env::default();
-    let vault = vault_with_emissions_and_short_router(&e, 10);
+    let (vault, admin) = vault_with_emissions_and_short_router(&e, 10);
 
+    as_admin(&e, &admin, &vault.address, 1_000_0000000);
     let result = vault.try_claim_emissions(&1_000_0000000);
     assert_eq!(
         result.err(),
@@ -213,12 +233,14 @@ fn test_claim_emissions_enforces_the_floor_on_what_arrived() {
     );
 
     // One stroop over what the router pays is refused; exactly that is not.
+    as_admin(&e, &admin, &vault.address, 11);
     assert_eq!(
         vault.try_claim_emissions(&11).err(),
         Some(Ok(Error::from_contract_error(
             BlendVaultError::SwapBelowMinimum as u32
         )))
     );
+    as_admin(&e, &admin, &vault.address, 10);
     assert_eq!(vault.claim_emissions(&10), 10);
 }
 
@@ -227,9 +249,10 @@ fn test_claim_emissions_enforces_the_floor_on_what_arrived() {
 #[test]
 fn test_claim_emissions_returns_what_arrived_not_what_the_router_reports() {
     let e = Env::default();
-    let vault = vault_with_emissions_and_short_router(&e, 10);
+    let (vault, admin) = vault_with_emissions_and_short_router(&e, 10);
 
     // The mock reports max(floor, BLND in), far more than the 10 it pays.
+    as_admin(&e, &admin, &vault.address, 0);
     assert_eq!(vault.claim_emissions(&0), 10);
 }
 
@@ -238,12 +261,79 @@ fn test_claim_emissions_returns_what_arrived_not_what_the_router_reports() {
 #[test]
 fn test_claim_emissions_refuses_a_swap_that_delivers_nothing() {
     let e = Env::default();
-    let vault = vault_with_emissions_and_short_router(&e, 0);
+    let (vault, admin) = vault_with_emissions_and_short_router(&e, 0);
 
+    as_admin(&e, &admin, &vault.address, 0);
     assert_eq!(
         vault.try_claim_emissions(&0).err(),
         Some(Ok(Error::from_contract_error(
             BlendVaultError::SwapNoOutput as u32
         )))
     );
+}
+
+// ── who may harvest, and along which route ───────────────────────────────────
+
+/// Without the admin's signature the harvest is refused before it touches
+/// anything: the floor is only meaningful from a party the vault trusts.
+#[test]
+#[should_panic(expected = "Error(Auth, InvalidAction)")]
+fn test_claim_emissions_without_admin_auth_reverts() {
+    let e = Env::default();
+    let (vault, _admin) = vault_with_emissions_and_short_router(&e, 10);
+
+    // No signatures at all (set_auths(&[]) is in force from the helper).
+    vault.claim_emissions(&0);
+}
+
+/// The route is the admin's to set, must start at BLND and end at the
+/// underlying, and the harvest follows it.
+#[test]
+fn test_swap_path_is_admin_set_and_checked() {
+    let e = Env::default();
+    let (vault, admin) = vault_with_emissions_and_short_router(&e, 10);
+    let blnd = vault.get_swap_path().get(0).unwrap();
+    let asset = vault.get_swap_path().last().unwrap();
+    let via = Address::generate(&e);
+
+    // Default route is the direct pair.
+    assert_eq!(vault.get_swap_path(), vec![&e, blnd.clone(), asset.clone()]);
+
+    // Not the admin: refused.
+    assert!(vault
+        .try_set_swap_path(&vec![&e, blnd.clone(), via.clone(), asset.clone()])
+        .is_err());
+
+    let set_as_admin = |path: soroban_sdk::Vec<Address>| {
+        e.mock_auths(&[MockAuth {
+            address: &admin,
+            invoke: &MockAuthInvoke {
+                contract: &vault.address,
+                fn_name: "set_swap_path",
+                args: (path.clone(),).into_val(&e),
+                sub_invokes: &[],
+            },
+        }]);
+        vault.try_set_swap_path(&path)
+    };
+
+    // Wrong ends or too short: the typed error.
+    let invalid = Some(Ok(Error::from_contract_error(
+        BlendVaultError::SwapPathInvalid as u32,
+    )));
+    assert_eq!(set_as_admin(vec![&e, blnd.clone()]).err(), invalid);
+    assert_eq!(
+        set_as_admin(vec![&e, via.clone(), asset.clone()]).err(),
+        invalid
+    );
+    assert_eq!(
+        set_as_admin(vec![&e, blnd.clone(), via.clone()]).err(),
+        invalid
+    );
+
+    // A valid two-hop route is stored and the harvest completes along it.
+    assert!(set_as_admin(vec![&e, blnd.clone(), via.clone(), asset.clone()]).is_ok());
+    assert_eq!(vault.get_swap_path(), vec![&e, blnd, via, asset]);
+    as_admin(&e, &admin, &vault.address, 10);
+    assert_eq!(vault.claim_emissions(&10), 10);
 }

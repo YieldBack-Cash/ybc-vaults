@@ -5,14 +5,14 @@ use crate::{
     vault::{self, VaultData},
 };
 
-use soroban_sdk::{
-    auth::{ContractContext, InvokerContractAuthEntry, SubContractInvocation},
-    contract, contractimpl, panic_with_error, vec, Address, Env, IntoVal, String, Symbol,
-};
+use soroban_sdk::{contract, contractimpl, panic_with_error, vec, Address, Env, String, Vec};
 use stellar_tokens::fungible::Base;
 use vault_common::{
-    auth::spend_operator_allowance, events as shared_events, guard::require_positive,
-    math::mul_div_floor, ttl,
+    auth::{authorize_transfer_as_current, spend_operator_allowance},
+    events as shared_events,
+    guard::require_positive,
+    math::mul_div_ceil,
+    ttl,
 };
 
 #[contract]
@@ -31,7 +31,8 @@ impl BlendVault {
     /// Initializes the vault over one reserve of one Blend pool.
     ///
     /// ### Arguments
-    /// * `admin` - Authorized for `set_admin` and `set_router`
+    /// * `admin` - Authorized for `set_admin`, `set_router`, `set_swap_path`
+    ///   and `claim_emissions`
     /// * `pool` - The Blend pool the vault will supply into
     /// * `asset` - The reserve asset the vault supports
     /// * `blnd_token` - The BLND token, for emissions harvesting
@@ -299,23 +300,51 @@ impl BlendVault {
         storage::set_router(e, &router);
     }
 
+    /// Sets the route the harvest sells BLND along: a list of token addresses
+    /// starting at BLND and ending at the underlying, one Soroswap pair per
+    /// adjacent pair of entries. Unset, the harvest uses the direct pair.
+    /// Most BLND liquidity sits in one BLND:USDC pool, so a vault in another
+    /// asset will usually want `[BLND, USDC, asset]`.
+    pub fn set_swap_path(e: &Env, path: Vec<Address>) {
+        ttl::extend_instance_ttl(e);
+        storage::get_admin(e).require_auth();
+        if path.len() < 2
+            || path.get(0) != Some(storage::get_blnd_token(e))
+            || path.last() != Some(storage::get_asset(e))
+        {
+            panic_with_error!(e, BlendVaultError::SwapPathInvalid);
+        }
+        storage::set_swap_path(e, &path);
+    }
+
+    /// The route the harvest sells BLND along.
+    pub fn get_swap_path(e: &Env) -> Vec<Address> {
+        storage::get_swap_path(e)
+            .unwrap_or_else(|| vec![e, storage::get_blnd_token(e), storage::get_asset(e)])
+    }
+
     /// Claims accrued BLND emissions from the pool, swaps them for the underlying
     /// asset via Soroswap, and supplies the proceeds back into the pool. Every
     /// depositor's share value increases automatically.
     ///
-    /// Unprivileged. `amount_out_min` is the caller's slippage floor on the
-    /// swap leg, enforced here against the asset that actually arrived
-    /// (`SwapBelowMinimum`), not left to the router.
+    /// Admin only. There is no on-chain price for BLND to derive a fair floor
+    /// from, so the floor has to come from a party the vault trusts, and the
+    /// admin already chooses the router the swap goes through. An open call
+    /// with a caller-chosen floor would let anyone move the BLND price,
+    /// harvest at floor zero and move it back, taking that harvest's yield.
+    /// `amount_out_min` is enforced here against the asset that actually
+    /// arrived (`SwapBelowMinimum`), not left to the router.
     ///
     /// ### Returns
     /// * `i128` - The amount of underlying tokens received and re-supplied
     pub fn claim_emissions(e: &Env, amount_out_min: i128) -> i128 {
         ttl::extend_instance_ttl(e);
+        storage::get_admin(e).require_auth();
         let pool = storage::get_pool(e);
         let asset = storage::get_asset(e);
-        let blnd = storage::get_blnd_token(e);
         let router = storage::get_router(e)
             .unwrap_or_else(|| panic_with_error!(e, BlendVaultError::SwapNotConfigured));
+        let path = Self::get_swap_path(e);
 
         let supply_token_id = pool::reserve_supply_token_id(e, &pool, &asset);
         let blnd_claimed = pool::claim(
@@ -329,26 +358,20 @@ impl BlendVault {
         }
 
         let underlying_received =
-            swap::swap_blnd_for_asset(e, &router, &blnd, &asset, blnd_claimed, amount_out_min);
+            swap::swap_blnd_for_asset(e, &router, &path, &asset, blnd_claimed, amount_out_min);
 
+        // Blend's `submit` pulls the tokens by `transfer(vault, pool, amount)`
+        // as a sub-invocation.
         let vault = e.current_contract_address();
-        e.authorize_as_current_contract(vec![
-            e,
-            InvokerContractAuthEntry::Contract(SubContractInvocation {
-                context: ContractContext {
-                    contract: asset.clone(),
-                    fn_name: Symbol::new(e, "transfer"),
-                    args: (vault.clone(), pool.clone(), underlying_received).into_val(e),
-                },
-                sub_invocations: vec![e],
-            }),
-        ]);
+        authorize_transfer_as_current(e, &asset, &vault, &pool, underlying_received);
         pool::supply(e, &pool, &asset, &vault, underlying_received);
 
-        let mut vault = Self::updated_vault(e);
-        vault.total_b_tokens =
-            pool::vault_b_token_balance(e, &pool, &asset, &e.current_contract_address());
-        storage::set_vault_data(e, &vault);
+        // Take the pool's own figure rather than adding the credited bTokens:
+        // this also absorbs any rounding drift between the vault's ledger and
+        // the pool's.
+        let mut state = Self::updated_vault(e);
+        state.total_b_tokens = pool::vault_b_token_balance(e, &pool, &asset, &vault);
+        storage::set_vault_data(e, &state);
 
         events::emissions_claim(e, &pool, blnd_claimed, underlying_received);
         underlying_received
