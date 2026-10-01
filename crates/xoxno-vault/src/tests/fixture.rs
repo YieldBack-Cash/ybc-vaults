@@ -143,4 +143,10 @@ impl ConformanceFixture for VaultFixture<'_> {
         VaultFixture::write_down(self, bps);
         true
     }
+
+    /// The controller's own figure for the vault's account.
+    fn backing(&self) -> i128 {
+        self.controller
+            .get_collateral_amount(&self.vault.account_id(), &self.hub_asset())
+    }
 }

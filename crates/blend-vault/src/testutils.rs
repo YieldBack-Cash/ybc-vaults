@@ -7,7 +7,8 @@
 //! that is nothing but a settable `b_rate`, a 1:1 swap router, and a router
 //! that pays less than it reports).
 
-use crate::constants::SCALAR_7;
+use crate::blend::pool::PoolDataKey;
+use crate::constants::{SCALAR_12, SCALAR_7};
 use crate::BlendVault;
 use soroban_sdk::{
     testutils::Address as _,
@@ -268,9 +269,36 @@ impl vault_testkit::ConformanceFixture for BlendConformanceFixture {
         );
     }
 
-    /// A Blend supply position cannot be written down from outside the pool.
-    fn write_down(&self, _bps: i128) -> bool {
-        false
+    /// A default, done the way `tests/test_default.rs` does it: lower the
+    /// reserve's `b_rate` in the pool's own storage by `bps`, and move the
+    /// lost value onto the debt side so the reserve's books still balance.
+    /// Nothing outside the pool can cause this, which is why it is written
+    /// straight into storage; the point is that the vault reports it.
+    fn write_down(&self, bps: i128) -> bool {
+        let pool_client = PoolClient::new(&self.e, &self.pool);
+        let reserve = pool_client.get_reserve(&self.asset);
+        let pre_supply = fixed_mul_floor(reserve.data.b_rate, reserve.data.b_supply, SCALAR_12);
+        self.e.as_contract(&self.pool, || {
+            let mut data = reserve.data.clone();
+            data.b_rate = data.b_rate - fixed_mul_floor(data.b_rate, bps, 10_000);
+            let new_supply = fixed_mul_floor(data.b_supply, data.b_rate, SCALAR_12);
+            data.d_supply = fixed_div_floor(pre_supply - new_supply, data.d_rate, SCALAR_12);
+            self.e
+                .storage()
+                .persistent()
+                .set(&PoolDataKey::ResData(self.asset.clone()), &data);
+        });
+        true
+    }
+
+    /// The vault's bTokens as the POOL records them, at the pool's rate. The
+    /// vault keeps its own `total_b_tokens`; this deliberately does not read
+    /// it.
+    fn backing(&self) -> i128 {
+        let b_tokens =
+            crate::pool::vault_b_token_balance(&self.e, &self.pool, &self.asset, &self.vault);
+        let b_rate = crate::pool::reserve_b_rate(&self.e, &self.pool, &self.asset);
+        fixed_mul_floor(b_tokens, b_rate, SCALAR_12)
     }
 }
 

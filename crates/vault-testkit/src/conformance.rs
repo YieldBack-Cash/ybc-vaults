@@ -219,12 +219,12 @@ pub fn approve_rejects_a_negative_amount(f: &impl ConformanceFixture) {
 
 /// The yield manager assumes the rate never falls; it must at least rise when
 /// the protocol accrues.
-pub fn rate_is_non_decreasing_under_accrual(f: &impl ConformanceFixture) {
+pub fn rate_rises_under_accrual(f: &impl ConformanceFixture) {
     let user = actor(f);
     deposit_for(f, &user);
     let before = vault(f).convert_to_assets(&ONE);
 
-    f.accrue(1_000); // +10%
+    f.accrue(1_000); // target +10%
 
     let after = vault(f).convert_to_assets(&ONE);
     assert!(after > before, "rate did not rise: {before} -> {after}");
@@ -440,6 +440,8 @@ pub fn operator_allowance_is_consumed_by_withdraw(f: &impl ConformanceFixture) {
 
 // ── SEP-56: limits ──────────────────────────────────────────────────────────
 
+/// With the protocol liquid. The `withdraw_limit` cap is each adapter's own
+/// test.
 pub fn max_redeem_is_the_balance_and_max_withdraw_its_value(f: &impl ConformanceFixture) {
     let user = actor(f);
     let minted = deposit_for(f, &user);
@@ -537,9 +539,9 @@ pub fn redeem_and_withdraw_publish_the_standard_withdraw_event(f: &impl Conforma
 // ── solvency ────────────────────────────────────────────────────────────────
 
 /// After any mix of the four entry points, the shares outstanding are never
-/// worth more than the assets the vault holds: every rounding fell the
-/// vault's way.
-pub fn outstanding_shares_are_never_worth_more_than_total_assets(f: &impl ConformanceFixture) {
+/// worth more than the position the protocol records for the vault, nor than
+/// the vault's own `total_assets`: every rounding fell the vault's way.
+pub fn outstanding_shares_are_never_worth_more_than_the_backing(f: &impl ConformanceFixture) {
     let a = actor(f);
     let b = actor(f);
     deposit_for(f, &a);
@@ -555,4 +557,17 @@ pub fn outstanding_shares_are_never_worth_more_than_total_assets(f: &impl Confor
     let worth = vault(f).convert_to_assets(&supply);
     let held = vault(f).total_assets();
     assert!(worth <= held, "shares worth {worth} > assets held {held}");
+
+    // The line above can be a tautology: an adapter that derives both figures
+    // from one stored total passes it whatever the real position is. This
+    // one cannot be, because the right-hand side is the protocol's.
+    let backing = f.backing();
+    assert!(
+        worth <= backing,
+        "shares worth {worth} > the position the protocol records {backing}"
+    );
+    assert!(
+        held <= backing,
+        "the vault reports {held} but the protocol records {backing}"
+    );
 }

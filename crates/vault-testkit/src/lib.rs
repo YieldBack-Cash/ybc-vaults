@@ -36,13 +36,21 @@ pub trait ConformanceFixture {
     /// Mints `amount` of the underlying to `to`.
     fn mint(&self, to: &Address, amount: i128);
 
-    /// Makes the protocol accrue `bps` basis points of yield, funded so that
-    /// redeeming the gain actually pays.
+    /// Makes the protocol accrue yield, funded so that redeeming the gain
+    /// actually pays. `bps` is a target a fixture may not hit exactly; the
+    /// suite asserts only that the rate rose.
     fn accrue(&self, bps: i128);
 
     /// Makes the protocol lose `bps` of value. Returns `false` if the protocol
     /// cannot lose value, in which case the write-down property is skipped.
     fn write_down(&self, bps: i128) -> bool;
+
+    /// What the protocol says the vault's position is worth in the underlying,
+    /// read from the protocol's own records and not from anything the vault
+    /// stores. The solvency property compares the shares' value against this,
+    /// so an adapter whose bookkeeping drifted from its real position fails
+    /// it; against the vault's own `total_assets` alone it could not.
+    fn backing(&self) -> i128;
 }
 
 /// The conformance client: SEP-56 exactly as `vault_common::sep56` declares
@@ -143,7 +151,7 @@ macro_rules! conformance_tests {
             transfer_rejects_a_negative_amount,
             transfer_from_rejects_a_negative_amount,
             approve_rejects_a_negative_amount,
-            rate_is_non_decreasing_under_accrual,
+            rate_rises_under_accrual,
             a_write_down_is_reported_honestly,
             conversions_round_down_and_never_gain_on_a_round_trip,
             preview_deposit_never_overstates_the_deposit,
@@ -162,7 +170,7 @@ macro_rules! conformance_tests {
             max_mint_is_max_deposit_in_shares,
             deposit_and_mint_publish_the_standard_deposit_event,
             redeem_and_withdraw_publish_the_standard_withdraw_event,
-            outstanding_shares_are_never_worth_more_than_total_assets,
+            outstanding_shares_are_never_worth_more_than_the_backing,
         );
     };
     (@each $fixture:expr; $($name:ident),* $(,)?) => {
