@@ -18,9 +18,7 @@ fn first_deposit_opens_an_account_and_mints_shares() {
 
 /// The controller stores positions as 27-decimal Rays; shares are that figure
 /// at asset precision. Pins both the vault's conversion and the mock's
-/// fidelity to the real protocol, which a testnet simulation found wanting:
-/// the first mock stored 7-decimal units and the vault minted 1e20 shares per
-/// stroop against the real controller.
+/// fidelity to the real protocol (see `SCALED_UNIT`).
 #[test]
 fn shares_are_the_ray_position_at_asset_precision() {
     use crate::vault::SCALED_UNIT;
@@ -77,4 +75,3 @@ fn accrual_raises_share_value_for_existing_holders() {
     // Share count is untouched — only the multiplier moved.
     assert_eq!(f.vault.balance(&f.user), 1_000_0000000);
 }
-

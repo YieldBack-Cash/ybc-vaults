@@ -18,8 +18,7 @@
 //! never call.
 
 use soroban_sdk::{
-    testutils::Address as _, token::TokenClient, xdr::ScErrorCode, Address, Env,
-    Error, InvokeError,
+    testutils::Address as _, token::TokenClient, xdr::ScErrorCode, Address, Env, Error, InvokeError,
 };
 
 pub use vault_common::VaultError;

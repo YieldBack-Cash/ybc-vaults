@@ -16,9 +16,8 @@ use soroban_sdk::contracterror;
 ///
 /// The share token delegates to OpenZeppelin, so its codes surface unchanged
 /// from every adapter (`LessThanZero = 103` on a negative transfer, and so on).
-/// An adapter must never reuse that range: `blend-vault-v2` did, and its
-/// `InvalidAmount = 102` was indistinguishable from OZ's
-/// `InvalidLiveUntilLedger`.
+/// An adapter must never reuse that range: an adapter code of 102 would be
+/// indistinguishable from OZ's `InvalidLiveUntilLedger`.
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[repr(u32)]
@@ -28,6 +27,5 @@ pub enum VaultError {
 
     /// An amount at an entry point was zero or negative.
     AmountNotPositive = 20,
-    // 40 was `SweepForbidden`; `sweep` was removed (rewards are protocol
-    // yield, harvested by the adapter, never an admin rescue). Keep it retired.
+    // 40 is retired (was `SweepForbidden`); do not reuse.
 }

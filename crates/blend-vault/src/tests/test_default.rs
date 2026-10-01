@@ -1,5 +1,3 @@
-#![cfg(test)]
-
 //! A pool default: the reserve's `b_rate` falls and every holder's redeemable
 //! value falls with it. The vault must report the loss, not hide it.
 

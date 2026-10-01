@@ -35,7 +35,8 @@ pub mod helpers;
 ///
 /// The SDK generates this module from the controller WASM and its `Client`
 /// carries every user, keeper and view function. This copy carries only the
-/// nine the vault calls.
+/// nine it declares; eight are called, and `account_exists` is kept so the SDK
+/// swap is a path change.
 pub mod controller;
 
 pub use controller::Client as ControllerClient;

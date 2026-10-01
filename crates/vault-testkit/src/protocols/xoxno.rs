@@ -8,9 +8,8 @@
 //! * **Ray-scaled positions.** The controller stores every scaled amount as a
 //!   27-decimal `Ray`: `from_asset(amount) / index`, where `from_asset`
 //!   rescales the 7-decimal amount to 27 decimals. A 10 XLM supply at index
-//!   RAY is a `scaled_amount` of 1e28, not 1e8. The first version of this mock
-//!   stored asset-precision units, and the vault inherited the mistake all the
-//!   way to a testnet simulation that minted 1e20 PT per stroop.
+//!   RAY is a `scaled_amount` of 1e28, not 1e8 (see `SCALED_UNIT` in the
+//!   vault).
 //! * **Asymmetric rounding.** A supply credits `floor(...)` scaled units; a
 //!   withdrawal burns `ceil(...)`. That is what makes the redeem-side dust land
 //!   in the vault's favour, and a mock that floored both ways would let a
@@ -170,7 +169,7 @@ impl MockController {
     /// supplying into someone else's position.
     pub fn donate(e: Env, from: Address, account_id: u64, amount: i128) {
         let key = Self::hub_asset(e.clone());
-        TokenClient::new(&e, &key.asset).transfer(&from, &e.current_contract_address(), &amount);
+        TokenClient::new(&e, &key.asset).transfer(&from, e.current_contract_address(), &amount);
         let index = Self::index(e.clone());
         let delta = ray_scaled_floor(&e, amount, index);
         let scaled = Self::scaled(e.clone(), account_id) + delta;
@@ -201,7 +200,7 @@ impl MockController {
         let index = Self::index(e.clone());
 
         // The vault pre-authorized exactly this transfer before calling.
-        TokenClient::new(&e, &key.asset).transfer(&caller, &e.current_contract_address(), &amount);
+        TokenClient::new(&e, &key.asset).transfer(&caller, e.current_contract_address(), &amount);
 
         let id = if account_id == NEW_ACCOUNT {
             let next: u64 = e.storage().instance().get(&MockKey::NextId).unwrap_or(1);

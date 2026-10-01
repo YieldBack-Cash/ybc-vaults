@@ -28,10 +28,13 @@ pub enum DataKey {
 
 //---------- TTL ----------//
 
-pub use vault_common::ttl::DAY_IN_LEDGERS as ONE_DAY_LEDGERS;
+use vault_common::ttl::DAY_IN_LEDGERS;
 
-const LEDGER_BUMP_VAULT: u32 = 120 * ONE_DAY_LEDGERS;
-const LEDGER_THRESHOLD_VAULT: u32 = LEDGER_BUMP_VAULT - 20 * ONE_DAY_LEDGERS;
+// The vault's totals are a single persistent entry read on every call, so it
+// is bumped on a longer cycle than the instance: 120 days ahead once fewer
+// than 100 remain.
+const LEDGER_BUMP_VAULT: u32 = 120 * DAY_IN_LEDGERS;
+const LEDGER_THRESHOLD_VAULT: u32 = LEDGER_BUMP_VAULT - 20 * DAY_IN_LEDGERS;
 
 //---------- Instance ----------//
 

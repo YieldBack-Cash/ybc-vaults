@@ -34,8 +34,7 @@ pub const ASSET_DECIMALS: u32 = 7;
 /// `10^(27 - 7)` on the way in and multiplied back on the way out.
 ///
 /// Verified on the testnet controller (2026-09-24): a 10 XLM supply credits a
-/// `scaled_amount` of ~1e28, not ~1e8. Treating that as the share count
-/// would have minted 1e20 PT per stroop.
+/// `scaled_amount` of ~1e28, not ~1e8.
 pub const SCALED_UNIT: i128 = 100_000_000_000_000_000_000; // 10^20
 
 /// A raw Ray-scaled controller figure, at asset precision (floored).
@@ -50,7 +49,7 @@ pub fn shares_to_assets(e: &Env, shares: i128, index: i128) -> i128 {
 
 /// `shares = floor(assets * RAY / index)`.
 ///
-/// Views and the mock controller only. The deposit path never computes a
+/// Views only. The deposit path never computes a
 /// share count this way: it measures the scaled delta XOXNO actually credited,
 /// because XOXNO's own rounding decides that figure and a guess which floors
 /// differently would break the invariant cumulatively rather than once.
@@ -161,7 +160,6 @@ mod test {
 mod proptests {
     use super::*;
     use proptest::prelude::*;
-    use vault_common::math::mul_div_ceil;
 
     // 1 billion tokens at 7 decimals: keeps the model's `amount * SCALED_UNIT`
     // (an i128 stand-in for the controller's wider Ray arithmetic) in range.

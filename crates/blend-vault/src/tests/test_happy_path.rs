@@ -1,8 +1,6 @@
-#![cfg(test)]
-
 use crate::blend::pool::{Client as PoolClient, Request};
 use crate::constants::SCALAR_12;
-use crate::storage::ONE_DAY_LEDGERS;
+use crate::errors::BlendVaultError;
 use crate::testutils::{
     assert_approx_eq_abs, create_blend_pool, fixed_div_floor, register_blend_vault,
     setup_pool_util_rate, BlendFixture, EnvTestUtils, MockTokenClient,
@@ -10,6 +8,7 @@ use crate::testutils::{
 use crate::BlendVaultClient;
 use soroban_sdk::testutils::{Address as _, AuthorizedFunction, AuthorizedInvocation};
 use soroban_sdk::{unwrap::UnwrapOptimized, vec, Address, Env, Error, IntoVal, Symbol};
+use vault_testkit::ledger::ONE_DAY_LEDGERS;
 
 /// OpenZeppelin `FungibleTokenError::InsufficientBalance`.
 const INSUFFICIENT_BALANCE: u32 = 100;
@@ -104,7 +103,7 @@ fn test_happy_path() {
         Request {
             request_type: 0,
             address: usdc.clone(),
-            amount: starting_balance.clone(),
+            amount: starting_balance,
         },
     ];
     assert_eq!(
@@ -310,5 +309,10 @@ fn test_happy_path() {
 
     // vault claim_emissions requires a Soroswap router
     let result = blend_vault_client.try_claim_emissions(&0);
-    assert_eq!(result.err(), Some(Ok(Error::from_contract_error(205))));
+    assert_eq!(
+        result.err(),
+        Some(Ok(Error::from_contract_error(
+            BlendVaultError::SwapNotConfigured as u32
+        )))
+    );
 }

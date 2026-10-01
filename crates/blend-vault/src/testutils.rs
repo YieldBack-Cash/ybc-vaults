@@ -18,7 +18,9 @@ use soroban_sdk::{
 pub use vault_testkit::ledger::{EnvTestUtils, ONE_DAY_LEDGERS};
 pub use vault_testkit::protocols::blend::{setup_pool_util_rate, BlendFixture};
 
-use vault_testkit::protocols::blend::{self as blend_protocol, pool::Client as PoolClient, pool::Request};
+use vault_testkit::protocols::blend::{
+    self as blend_protocol, pool::Client as PoolClient, pool::Request,
+};
 
 // ── arithmetic ──────────────────────────────────────────────────────────────
 
@@ -206,6 +208,12 @@ pub struct BlendConformanceFixture {
     pub pool: Address,
 }
 
+impl Default for BlendConformanceFixture {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BlendConformanceFixture {
     pub fn new() -> Self {
         let e = Env::default();
@@ -306,7 +314,9 @@ pub mod mocksoroswap {
 /// fixed `payout` of the output token whatever floor it was given, and
 /// reports the floor as met. What the vault must not believe.
 pub mod mockshortrouter {
-    use soroban_sdk::{contract, contractimpl, symbol_short, token::TokenClient, Address, Env, Vec};
+    use soroban_sdk::{
+        contract, contractimpl, symbol_short, token::TokenClient, Address, Env, Vec,
+    };
 
     #[contract]
     pub struct MockShortRouter;
@@ -338,7 +348,10 @@ pub mod mockshortrouter {
         }
     }
 
-    pub fn register_mock_short_router(e: &soroban_sdk::Env, payout: i128) -> MockShortRouterClient<'_> {
+    pub fn register_mock_short_router(
+        e: &soroban_sdk::Env,
+        payout: i128,
+    ) -> MockShortRouterClient<'_> {
         let addr = e.register(MockShortRouter {}, (payout,));
         MockShortRouterClient::new(e, &addr)
     }

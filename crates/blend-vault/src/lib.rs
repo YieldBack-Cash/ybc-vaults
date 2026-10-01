@@ -23,15 +23,11 @@
 //! come from `vault_common`. This crate holds only what is
 //! Blend's: the pool client, the bToken ratio maths, and emissions harvesting.
 //!
-//! # Heritage
-//!
-//! Forked from Script3's `fee-vault-v2`. The vault ratio maths and its
-//! property tests are theirs; the fee modes, signer gate and hand-rolled share
-//! token that fork carried have been removed.
+//! Forked from Script3's `fee-vault-v2`; see the README for what was kept.
 
-#[cfg(any(test, feature = "testutils"))]
+#[cfg(test)]
 extern crate std;
-#[cfg(any(test, feature = "testutils"))]
+#[cfg(test)]
 pub mod testutils;
 
 pub mod blend;

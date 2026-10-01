@@ -6,7 +6,7 @@ use vault_common::{auth::spend_operator_allowance, events, guard::require_positi
 
 use crate::errors::XoxnoError;
 use crate::events::account_opened;
-use crate::lending::constants::{NEW_ACCOUNT, WITHDRAW_ALL};
+use crate::lending::constants::NEW_ACCOUNT;
 use crate::lending::controller::HubAssetKey;
 use crate::lending::helpers::authorize_transfer_as_current;
 use crate::lending::ControllerClient;
@@ -133,7 +133,7 @@ fn exit(
     // everything from this market", so passing it through would empty the
     // entire pooled position. Refuse instead. `withdraw` guards its input
     // positive, so this only trips for a dust `redeem` that floored to zero.
-    if assets <= WITHDRAW_ALL {
+    if assets <= 0 {
         panic_with_error!(e, XoxnoError::ZeroAssetRedeem);
     }
 

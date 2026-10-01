@@ -214,7 +214,12 @@ pub fn default_reserve_config() -> pool::ReserveConfig {
 /// already hold enough `underlying` for the seed (20M at 7 decimals).
 ///
 /// The shape YBC market tests want: one asset, real interest, nothing else.
-pub fn deploy_pool(env: &Env, protocol: &BlendFixture, admin: &Address, underlying: &Address) -> Address {
+pub fn deploy_pool(
+    env: &Env,
+    protocol: &BlendFixture,
+    admin: &Address,
+    underlying: &Address,
+) -> Address {
     let (oracle, oracle_client) = create_mock_oracle(env);
     oracle_client.set_price(underlying, &1_000_0000);
 
@@ -232,7 +237,9 @@ pub fn deploy_pool(env: &Env, protocol: &BlendFixture, admin: &Address, underlyi
     blend_pool.queue_set_reserve(underlying, &default_reserve_config());
     blend_pool.set_reserve(underlying);
 
-    protocol.backstop.deposit(admin, &pool_addr, &50_000_0000000i128);
+    protocol
+        .backstop
+        .deposit(admin, &pool_addr, &50_000_0000000i128);
     blend_pool.set_status(&3u32);
     blend_pool.update_status();
 

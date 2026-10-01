@@ -62,7 +62,7 @@ surface on the same address. YBC itself calls only `query_asset`,
 `convert_to_assets`, `deposit` and `redeem`. There are no fees, so every
 `preview_*` equals the matching conversion with the standard's rounding:
 `deposit` and `redeem` round down, `mint` and `withdraw` round up, and every
-rounding falls in the vault's favour (`tests/conformance.rs`).
+rounding falls in the vault's favour (`src/tests/conformance.rs`).
 
 Beyond the standard: `get_protocol() -> Address` (the XOXNO controller),
 informational, read by the YBC indexer so a curator can confirm the protocol
@@ -140,7 +140,7 @@ optional: at the 5M supply cap `shares × index` is around 5e40 against an
 **The zero sentinel.** XOXNO reads a withdrawal amount of `0` as *withdraw
 everything from this market*. A dust redeem flooring to zero assets would hand
 the entire pooled position to whoever asked for one share. `redeem` refuses it —
-see `tests/hazards.rs`.
+see `src/tests/hazards.rs`.
 
 **Deposits measure, never compute.** XOXNO's own rounding decides how many scaled
 units a supply credited. A locally computed guess that floored differently would

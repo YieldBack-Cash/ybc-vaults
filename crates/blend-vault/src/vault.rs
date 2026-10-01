@@ -14,13 +14,13 @@ use vault_common::math::{mul_div_ceil, mul_div_floor};
 #[cfg_attr(test, derive(Debug))]
 #[contracttype]
 pub struct VaultData {
-    /// The timestamp of the last update
+    /// When the totals were last updated. Informational; never read by the contract.
     pub last_update_timestamp: u64,
-    /// The reserve's last bRate
+    /// bToken-to-underlying rate as last read from the pool, 12-decimal (`SCALAR_12`).
     pub b_rate: i128,
-    /// The total shares issued by the vault
+    /// Shares issued by the vault; must equal `Base::total_supply`.
     pub total_shares: i128,
-    /// The total bToken deposits owned by the vault depositors.
+    /// bTokens the vault holds in the pool, in the pool's units (7 decimals).
     pub total_b_tokens: i128,
 }
 

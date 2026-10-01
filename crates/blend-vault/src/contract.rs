@@ -168,7 +168,13 @@ impl BlendVault {
 
     /// Mints **exactly** `shares` to `receiver`, supplying the underlying that
     /// costs (rounded up) from `from`. Returns the assets deposited.
-    pub fn mint(e: &Env, shares: i128, receiver: Address, from: Address, operator: Address) -> i128 {
+    pub fn mint(
+        e: &Env,
+        shares: i128,
+        receiver: Address,
+        from: Address,
+        operator: Address,
+    ) -> i128 {
         require_positive(e, shares);
         operator.require_auth();
         ttl::extend_instance_ttl(e);

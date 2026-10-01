@@ -6,7 +6,7 @@ one crate.
 
 | Crate | Kind | What it is |
 |---|---|---|
-| `crates/vault-common` | rlib | The share token (OpenZeppelin `Base`), the SEP-56 interface declared once (`impl_sep56!` writes the five derived views and compile-checks the rest), operator-allowance rule, amount guard, widening `mul_div_floor`, TTL policy, the SEP-56 `Deposit`/`Withdraw` events, shared error codes. **No rate math.** |
+| `crates/vault-common` | rlib | The share token (OpenZeppelin `Base`), the SEP-56 interface declared once (`impl_sep56!` writes the five derived views and compile-checks the rest), operator-allowance rule, amount guard, widening `mul_div_floor`/`mul_div_ceil`, TTL policy, the SEP-56 `Deposit`/`Withdraw` events, shared error codes. **No rate math.** |
 | `crates/vault-testkit` | rlib, test-only | The conformance suite every adapter runs: 36 properties, the SEP-56 rules (rounding, previews, limits, events) plus the ones drawn from the YBC threat model. Also the protocol fixtures (`protocols::blend`, a real Blend deployment; `protocols::xoxno`, the mock controller), which `ybc-contracts/tests/vaults` reuses. |
 | `crates/xoxno-vault` | contract | XOXNO lending adapter. Shares mirror XOXNO's scaled unit; the rate is the market's supply index. |
 | `crates/blend-vault` | contract | Blend pool adapter. Shares are a ratio over the vault's bToken position so harvested BLND emissions accrue to holders; the rate is that ratio through the pool's `b_rate`. |

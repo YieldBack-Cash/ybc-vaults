@@ -149,8 +149,8 @@ pub fn operator_allowance_is_consumed_by_redeem(f: &impl ConformanceFixture) {
 
 // ── share token ─────────────────────────────────────────────────────────────
 
-/// [F-2] `blend-vault-v2` read the credit side before writing the debit, so a
-/// self-transfer of the whole balance doubled it.
+/// [F-2] A share ledger that reads the recipient's balance before debiting the
+/// sender doubles a whole-balance self-transfer.
 pub fn self_transfer_leaves_the_balance_unchanged(f: &impl ConformanceFixture) {
     let user = actor(f);
     let minted = deposit_for(f, &user);

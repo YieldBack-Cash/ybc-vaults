@@ -1,5 +1,3 @@
-#![cfg(test)]
-
 //! `convert_to_assets` against a pool whose `b_rate` can be set directly, so
 //! the ratio maths can be pinned at exact values the real pool never lands on.
 //! Called through the trait-generated `VaultClient`, the client YBC-side code

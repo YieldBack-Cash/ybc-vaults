@@ -16,7 +16,7 @@
 //!   misshaped function a compile error at the adapter;
 //! * the operator-allowance rule for delegated exits ([`auth`]);
 //! * the positive-amount guard every entry point must call ([`guard`]);
-//! * a widening `mul_div_floor` on `U256` ([`math`]): the SDK's `i128` overflows
+//! * widening `mul_div_floor` / `mul_div_ceil` on `U256` ([`math`]): the SDK's `i128` overflows
 //!   on ordinary balances once an index or rate is in the multiplier;
 //! * instance TTL policy ([`ttl`]);
 //! * the two SEP-56 events, `Deposit` and `Withdraw`, exactly as the standard
