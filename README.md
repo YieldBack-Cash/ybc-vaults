@@ -20,7 +20,7 @@ indexer.
 ## Build and test
 
 ```bash
-make build        # stellar contract build --optimize; one .wasm per adapter
+make build        # stellar contract build, optimised and source-stamped as the release is; one .wasm per adapter
 make test         # cargo test --workspace
 ```
 

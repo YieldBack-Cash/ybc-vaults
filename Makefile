@@ -1,11 +1,13 @@
 default: build
 
 # `stellar contract build`, not `cargo build`: soroban-sdk 26's spec shaking
-# needs the CLI wrapper (v25.2.0+), and a bare cargo build fails in the SDK's
-# build script. Builds every cdylib member of the workspace; the shared and
-# test crates are rlib-only and are skipped.
+# needs the CLI wrapper, and a bare cargo build fails in the SDK's build
+# script. The flags are the ones the release workflow uses (`--optimize`, and
+# the source repository stamped into the binary), so a local build hashes the
+# same as the published release. Builds every cdylib member of the workspace;
+# the shared and test crates are rlib-only and are skipped.
 build:
-	stellar contract build --optimize
+	stellar contract build --optimize --meta source_repo=github:YieldBack-Cash/ybc-vaults
 	@ls -l target/wasm32v1-none/release/*.wasm
 
 test:

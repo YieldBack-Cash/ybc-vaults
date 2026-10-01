@@ -106,8 +106,8 @@ make build   # stellar contract build --optimize
 
 `stellar contract build` is required rather than `cargo build --target
 wasm32v1-none` — soroban-sdk 26's `experimental_spec_shaking_v2` feature needs
-the CLI wrapper (v25.2.0+), and a bare cargo build fails in the SDK's build
-script.
+the CLI wrapper, and a bare cargo build fails in the SDK's build script.
+`make build` adds the release workflow's flags.
 
 ## What is shared and what is XOXNO's
 
